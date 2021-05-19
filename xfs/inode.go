@@ -33,6 +33,9 @@ func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore); err != nil {
 		return nil, xerrors.Errorf("failed to read InodeCore: %w", err)
 	}
+	if !inode.inodeCore.isSupported() {
+		panic("not support inode version")
+	}
 
 	switch inode.inodeCore.Format {
 	case XFS_DINODE_FMT_DEV:
@@ -271,16 +274,16 @@ type InodeCore struct {
 	MetaUUID    [16]byte
 }
 
-func (m InodeCore) IsDir() bool {
-	return m.Mode&0x4000 != 0
+func (ic InodeCore) IsDir() bool {
+	return ic.Mode&0x4000 != 0
 }
 
-func (m InodeCore) IsRegular() bool {
-	return m.Mode&0x8000 != 0
+func (ic InodeCore) IsRegular() bool {
+	return ic.Mode&0x8000 != 0
 }
 
-func (m InodeCore) IsSymlink() bool {
-	return m.Mode&0xA000 != 0
+func (ic InodeCore) IsSymlink() bool {
+	return ic.Mode&0xA000 != 0
 }
 
 func (ic InodeCore) isSupported() bool {
