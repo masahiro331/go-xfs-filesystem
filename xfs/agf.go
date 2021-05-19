@@ -26,3 +26,11 @@ type AGF struct {
 	CRC            uint32
 	Spare2         uint32
 }
+
+type AB3B struct {
+	BtreeShortBlock
+}
+
+type AB3C struct {
+	BtreeShortBlock
+}

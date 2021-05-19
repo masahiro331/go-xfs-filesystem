@@ -21,3 +21,11 @@ type AGI struct {
 	Iblocks    uint32
 	Fblocks    uint32
 }
+
+type IAB3 struct {
+	BtreeShortBlock
+}
+
+type FIB3 struct {
+	BtreeShortBlock
+}
