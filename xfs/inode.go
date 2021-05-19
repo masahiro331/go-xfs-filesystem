@@ -26,55 +26,6 @@ const (
 	XFS_DINODE_FMT_RMAP
 )
 
-// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1787
-type BmbtRec struct {
-	L0 uint64
-	L1 uint64
-}
-
-func Mask64Lo(n int) uint64 {
-	return (1 << n) - 1
-}
-
-// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L60
-func (b BmbtRec) Unpack() BmbtIrec {
-	return BmbtIrec{
-		StartOff:   (b.L0 & Mask64Lo(64-BMBT_EXNTFLAG_BITLEN)) >> 9,
-		StartBlock: ((b.L0 & Mask64Lo(9)) << 43) | (b.L1 >> 21),
-		BlockCount: (b.L1 & Mask64Lo(21)),
-	}
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_types.h#L162
-type BmbtIrec struct {
-	StartOff   uint64
-	StartBlock uint64
-	BlockCount uint64
-	State      uint8
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
-type Dir2SfHdr struct {
-	Count   uint8
-	I8Count uint8
-	Parent  uint32
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
-type Dir2SfEntry struct {
-	Namelen uint8
-	Offset  [2]uint8
-	Name    string
-	Ftype   uint8
-	Inumber uint32
-}
-
-type Device struct{}
-
-type SymlinkString struct {
-	Name string
-}
-
 func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 	r := io.LimitReader(reader, inodeSize)
 
@@ -111,8 +62,6 @@ func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 				return nil, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL symlink error: %w", err)
 			}
 			inode.symlinkString.Name = string(buf)
-			// panic("not support XFS_DINODE_FMT_LOCAL IsSymlink")
-			// log.Print("not support XFS_DINODE_FMT_LOCAL IsSymlink")
 		} else {
 			panic("not support XFS_DINODE_FMT_LOCAL")
 		}
@@ -128,8 +77,7 @@ func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 				return nil, xerrors.Errorf("failed to read xfs_bmbt_irec error: %w", err)
 			}
 		} else if inode.inodeCore.IsSymlink() {
-			// panic("not support XFS_DINODE_FMT_EXTENTS isSymlink")
-			log.Print("not support XFS_DINODE_FMT_EXTENTS isSymlink")
+			panic("not support XFS_DINODE_FMT_EXTENTS isSymlink")
 		} else {
 			panic("not support XFS_DINODE_FMT_EXTENTS")
 		}
@@ -207,32 +155,6 @@ func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 	return &entry, nil
 }
 
-type InobtRec struct {
-	Startino  uint32
-	Freecount uint32
-	Free      uint64
-}
-
-func (ic InodeCore) isSupported() bool {
-	if ic.Version == 3 {
-		return true
-	}
-	return false
-}
-
-func ParseDatafork(format int) interface{} {
-	switch format {
-	case XFS_DINODE_FMT_DEV:
-	case XFS_DINODE_FMT_LOCAL:
-		// also... https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
-	case XFS_DINODE_FMT_EXTENTS:
-		// need https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1787-L1789
-	case XFS_DINODE_FMT_BTREE:
-	case XFS_DINODE_FMT_UUID:
-	}
-	panic(fmt.Sprintf("unknown format %d", format))
-}
-
 type Inode struct {
 	inodeCore InodeCore
 	// Device
@@ -262,16 +184,53 @@ type DirectoryLocal struct {
 	entries   []Dir2SfEntry
 }
 
-func (m InodeCore) IsDir() bool {
-	return m.Mode&0x4000 != 0
+// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1787
+type BmbtRec struct {
+	L0 uint64
+	L1 uint64
 }
 
-func (m InodeCore) IsRegular() bool {
-	return m.Mode&0x8000 != 0
+// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L60
+func (b BmbtRec) Unpack() BmbtIrec {
+	return BmbtIrec{
+		StartOff:   (b.L0 & Mask64Lo(64-BMBT_EXNTFLAG_BITLEN)) >> 9,
+		StartBlock: ((b.L0 & Mask64Lo(9)) << 43) | (b.L1 >> 21),
+		BlockCount: (b.L1 & Mask64Lo(21)),
+	}
 }
 
-func (m InodeCore) IsSymlink() bool {
-	return m.Mode&0xA000 != 0
+func Mask64Lo(n int) uint64 {
+	return (1 << n) - 1
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_types.h#L162
+type BmbtIrec struct {
+	StartOff   uint64
+	StartBlock uint64
+	BlockCount uint64
+	State      uint8
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
+type Dir2SfHdr struct {
+	Count   uint8
+	I8Count uint8
+	Parent  uint32
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
+type Dir2SfEntry struct {
+	Namelen uint8
+	Offset  [2]uint8
+	Name    string
+	Ftype   uint8
+	Inumber uint32
+}
+
+type Device struct{}
+
+type SymlinkString struct {
+	Name string
 }
 
 type InodeCore struct {
@@ -311,4 +270,29 @@ type InodeCore struct {
 	Crtime      uint64
 	Ino         uint64
 	MetaUUID    [16]byte
+}
+
+func (m InodeCore) IsDir() bool {
+	return m.Mode&0x4000 != 0
+}
+
+func (m InodeCore) IsRegular() bool {
+	return m.Mode&0x8000 != 0
+}
+
+func (m InodeCore) IsSymlink() bool {
+	return m.Mode&0xA000 != 0
+}
+
+func (ic InodeCore) isSupported() bool {
+	if ic.Version == 3 {
+		return true
+	}
+	return false
+}
+
+type InobtRec struct {
+	Startino  uint32
+	Freecount uint32
+	Free      uint64
 }
