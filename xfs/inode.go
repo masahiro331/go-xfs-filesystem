@@ -16,7 +16,6 @@ const (
 )
 
 const (
-
 	// typedef enum xfs_dinode_fmt
 	XFS_DINODE_FMT_DEV = iota
 	XFS_DINODE_FMT_LOCAL
