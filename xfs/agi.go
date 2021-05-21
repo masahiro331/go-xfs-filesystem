@@ -23,7 +23,8 @@ type AGI struct {
 }
 
 type IAB3 struct {
-	BtreeShortBlock
+	Header BtreeShortBlock
+	Inodes []InobtRec
 }
 
 type FIB3 struct {

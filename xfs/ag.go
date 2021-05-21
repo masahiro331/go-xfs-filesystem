@@ -23,7 +23,7 @@ type AG struct {
 	Fib3 FIB3
 }
 
-func NewAG(reader io.Reader) (*AG, error) {
+func ParseAG(reader io.Reader) (*AG, error) {
 	// TODO: Fix AGF, AGI spec
 	r := io.LimitReader(reader, int64(BlockSize*9))
 	buf := utils.ReadBlock(r)
@@ -49,11 +49,13 @@ func NewAG(reader io.Reader) (*AG, error) {
 		return nil, xerrors.Errorf("failed to read agfl: %w", err)
 	}
 
+	// parse AB3B
 	sblockReader := bytes.NewReader(utils.ReadBlock(r))
 	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Ab3b); err != nil {
 		log.Fatalf("binary read error: %+v", err)
 	}
 
+	// parse AB3C
 	sblockReader = bytes.NewReader(utils.ReadBlock(r))
 	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Ab3c); err != nil {
 		log.Fatalf("binary read error: %+v", err)
@@ -61,22 +63,24 @@ func NewAG(reader io.Reader) (*AG, error) {
 
 	// parse IAB3
 	sblockReader = bytes.NewReader(utils.ReadBlock(r))
-	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Iab3); err != nil {
+	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Iab3.Header); err != nil {
 		log.Fatalf("binary read error: %+v", err)
 	}
-	var inodes []InobtRec
-	for i := 0; i < int(ag.Iab3.Numrecs); i++ {
+	for i := 0; i < int(ag.Iab3.Header.Numrecs); i++ {
 		var inode InobtRec
 		if err := binary.Read(sblockReader, binary.BigEndian, &inode); err != nil {
 			log.Fatalf("binary read error: %+v", err)
 		}
-		inodes = append(inodes, inode)
+		ag.Iab3.Inodes = append(ag.Iab3.Inodes, inode)
 	}
 
-	// FIB3
-	utils.ReadBlock(r)
+	// parse FIB3
+	sblockReader = bytes.NewReader(utils.ReadBlock(r))
+	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Fib3); err != nil {
+		log.Fatalf("binary read error: %+v", err)
+	}
 
-	// read Free block
+	// parse Freeblock
 	utils.ReadBlock(r)
 	utils.ReadBlock(r)
 	utils.ReadBlock(r)

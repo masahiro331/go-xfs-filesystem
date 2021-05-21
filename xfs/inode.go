@@ -33,8 +33,9 @@ func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore); err != nil {
 		return nil, xerrors.Errorf("failed to read InodeCore: %w", err)
 	}
+
 	if !inode.inodeCore.isSupported() {
-		panic("not support inode version")
+		panic(fmt.Sprintf("not support inode version %+v", inode))
 	}
 
 	switch inode.inodeCore.Format {
@@ -70,13 +71,21 @@ func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 	case XFS_DINODE_FMT_EXTENTS:
 		if inode.inodeCore.IsDir() {
 			inode.directoryExtents = &DirectoryExtents{}
-			if err := binary.Read(r, binary.BigEndian, &inode.directoryExtents.bmbtRec); err != nil {
-				return nil, xerrors.Errorf("failed to read xfs_bmbt_irec error: %w", err)
+			for i := uint32(0); i < inode.inodeCore.Nextents; i++ {
+				var bmbtRec BmbtRec
+				if err := binary.Read(r, binary.BigEndian, &bmbtRec); err != nil {
+					return nil, xerrors.Errorf("failed to read xfs_bmbt_irec error: %w", err)
+				}
+				inode.directoryExtents.bmbtRecs = append(inode.directoryExtents.bmbtRecs, bmbtRec)
 			}
 		} else if inode.inodeCore.IsRegular() {
 			inode.regularExtent = &RegularExtent{}
-			if err := binary.Read(r, binary.BigEndian, &inode.regularExtent.bmbtRec); err != nil {
-				return nil, xerrors.Errorf("failed to read xfs_bmbt_irec error: %w", err)
+			for i := uint32(0); i < inode.inodeCore.Nextents; i++ {
+				var bmbtRec BmbtRec
+				if err := binary.Read(r, binary.BigEndian, &bmbtRec); err != nil {
+					return nil, xerrors.Errorf("failed to read xfs_bmbt_irec error: %w", err)
+				}
+				inode.regularExtent.bmbtRecs = append(inode.regularExtent.bmbtRecs, bmbtRec)
 			}
 		} else if inode.inodeCore.IsSymlink() {
 			panic("not support XFS_DINODE_FMT_EXTENTS isSymlink")
@@ -111,10 +120,15 @@ func (i *Inode) String() string {
 	}
 	if i.directoryExtents != nil {
 		s = s + fmt.Sprintf("%+v\n", i.directoryExtents)
-		//  fmt.Println(i.directoryExtents.bmbtRec.Unpack())
+		for i, b := range i.directoryExtents.bmbtRecs {
+			s = s + fmt.Sprintf("%d: %+v\n", i, b.Unpack())
+		}
 	}
 	if i.regularExtent != nil {
 		s = s + fmt.Sprintf("%+v\n", i.regularExtent)
+		for i, b := range i.regularExtent.bmbtRecs {
+			s = s + fmt.Sprintf("%d: %+v\n", i, b.Unpack())
+		}
 	}
 
 	if i.symlinkString != nil {
@@ -174,11 +188,11 @@ type Inode struct {
 }
 
 type RegularExtent struct {
-	bmbtRec BmbtRec
+	bmbtRecs []BmbtRec
 }
 
 type DirectoryExtents struct {
-	bmbtRec BmbtRec
+	bmbtRecs []BmbtRec
 }
 
 type DirectoryLocal struct {
@@ -220,13 +234,57 @@ type Dir2SfHdr struct {
 	Parent  uint32
 }
 
+const XFS_DIR2_DATA_FD_COUNT = 3
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L320-L324
+type Dir3DataHdr struct {
+	Dir3BlkHdr
+	Frees   [XFS_DIR2_DATA_FD_COUNT]Dir2DataFree
+	Padding uint32
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L311-L318
+type Dir3BlkHdr struct {
+	Magic    uint32
+	CRC      uint32
+	BlockNo  uint64
+	Lsn      uint64
+	MetaUUID [16]byte
+	Owner    uint64
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L339-L345
+type Dir2DataEntry struct {
+	Inumber  uint64
+	Namelen  uint8
+	Name     string
+	Filetype uint8
+	Tag      uint16
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L353-L358
+type Dir2DataUnused struct {
+	Freetag uint16
+	Length  uint16
+	Tag     uint16
+}
+
+type Dir2DataFree struct {
+	Offset uint16
+	Length uint16
+}
+
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
 type Dir2SfEntry struct {
 	Namelen uint8
 	Offset  [2]uint8
 	Name    string
-	Ftype   uint8
+	Ftype   uint8 // 1: File? 2: Directory?
 	Inumber uint32
+}
+
+func (e Dir2SfEntry) String() string {
+	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name, e.Ftype, e.Inumber)
 }
 
 type Device struct{}

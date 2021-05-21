@@ -54,23 +54,33 @@ type SuperBlock struct {
 	FeaturesRoCompat    uint32
 	FeaturesIncompat    uint32
 	FeaturesLogIncompat uint32
-
-	CRC        uint32
-	SpinoAlign uint32
-	Pquotino   uint64
-	Lsn        int64
-	MetaUUID   [16]byte
+	CRC                 uint32
+	SpinoAlign          uint32
+	Pquotino            uint64
+	Lsn                 int64
+	MetaUUID            [16]byte
 }
 
 // return (AG number), (Inode Block), (Inode Offset)
 func (sb SuperBlock) InodeOffset(inodeNumber uint32) (int, uint64, uint64) {
-	offsetAddress := sb.Inopblock + uint16(sb.Agblocks)
-	lowMask := (1<<(offsetAddress+1) - 1)
-
+	offsetAddress := sb.Inopblog + sb.Agdlklog
+	lowMask := (1<<(offsetAddress) - 1)
 	AGNumber := inodeNumber >> uint32(offsetAddress)
+
 	relativeInodeNumber := inodeNumber & uint32(lowMask)
 	InodeBlock := relativeInodeNumber / uint32(sb.Inopblock)
 	InodeOffset := relativeInodeNumber % uint32(sb.Inopblock)
 
 	return int(AGNumber), uint64(InodeBlock), uint64(InodeOffset)
+}
+
+// return Offset
+func (sb SuperBlock) InodeAbsOffset(inodeNumber uint32) uint64 {
+	agNumber, blockCount, inodeOffset := sb.InodeOffset(inodeNumber)
+
+	offset := (uint64(agNumber) * uint64(sb.Agblocks*sb.BlockSize)) +
+		(blockCount * uint64(sb.BlockSize)) +
+		inodeOffset*uint64(sb.Inodesize)
+
+	return offset
 }
