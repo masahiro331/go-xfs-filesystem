@@ -1,12 +1,14 @@
 package xfs
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"unsafe"
 
 	"golang.org/x/xerrors"
 )
@@ -142,6 +144,89 @@ func (i *Inode) String() string {
 	return s
 }
 
+var UnsupportedDir2BlockHeaderErr = xerrors.New("unsupported block")
+
+const (
+	FreeTag = 0xffff
+)
+
+func parseDir2Block(reader io.Reader, blockSize uint32) (*Dir2Block, error) {
+	block := Dir2Block{}
+	r := io.LimitReader(reader, int64(blockSize))
+
+	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
+		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
+	}
+	if block.Header.Magic != 0x58444433 { // XDD3
+		return nil, xerrors.Errorf("failed to parse header error magic: %v: %w", block.Header.Magic, UnsupportedDir2BlockHeaderErr)
+	}
+
+	for {
+		entry := Dir2DataEntry{}
+
+		ino := make([]byte, unsafe.Sizeof(entry.Inumber))
+		_, err := r.Read(ino)
+		if err != nil {
+			if err == io.EOF {
+				return &block, nil
+			}
+			return nil, xerrors.Errorf("failed to read inumber: %w", err)
+		}
+		if err := binary.Read(bytes.NewReader(ino), binary.BigEndian, &entry.Inumber); err != nil {
+			return nil, xerrors.Errorf("failed to read inumber binary: %w", err)
+		}
+		if (entry.Inumber >> 48) == FreeTag {
+			freeLen := (entry.Inumber >> 32) & Mask64Lo(16)
+			if freeLen != 8 {
+				// Read FreeTag tail
+				_, err := r.Read(make([]byte, freeLen-0x08))
+				if err != nil {
+					return nil, xerrors.Errorf("failed to read unused padding: %w", err)
+				}
+			}
+
+			continue
+		}
+		if err := binary.Read(r, binary.BigEndian, &entry.Namelen); err != nil {
+			return nil, xerrors.Errorf("failed to read name length: %w", err)
+		}
+		nameBuf := make([]byte, entry.Namelen)
+		n, err := r.Read(nameBuf)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read name: %w", err)
+		}
+		if n != int(entry.Namelen) {
+			return nil, xerrors.Errorf("failed to read name: expected namelen(%d) actual(%d)", entry.Namelen, n)
+		}
+		entry.Name = string(nameBuf)
+
+		if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
+			return nil, xerrors.Errorf("failed to read file type: %w", err)
+		}
+
+		// 12 = Inumber + Namelen + Filetype + Tag
+		// 8  = Alignment
+		align := (int(unsafe.Sizeof(entry.Inumber)) +
+			int(unsafe.Sizeof(entry.Namelen)) +
+			int(unsafe.Sizeof(entry.Filetype)) +
+			int(unsafe.Sizeof(entry.Tag)) + n) % 8
+		if align != 0 {
+			n, err = r.Read(make([]byte, 8-align))
+			if err != nil {
+				return nil, xerrors.Errorf("failed to read alignment: %w", err)
+			}
+			if n != int(8-align) {
+				return nil, xerrors.Errorf("failed to read alignment: expected namelen(%d) actual(%d)", entry.Namelen, n)
+			}
+		}
+
+		if err := binary.Read(r, binary.BigEndian, &entry.Tag); err != nil {
+			return nil, xerrors.Errorf("failed to read tag: %w", err)
+		}
+		block.Entries = append(block.Entries, entry)
+	}
+}
+
 func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 	var entry Dir2SfEntry
 	if err := binary.Read(r, binary.BigEndian, &entry.Namelen); err != nil {
@@ -160,7 +245,7 @@ func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 		return nil, errors.New("")
 	}
 	entry.Name = string(buf)
-	if err := binary.Read(r, binary.BigEndian, &entry.Ftype); err != nil {
+	if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
 		return nil, err
 	}
 
@@ -169,6 +254,10 @@ func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 	}
 
 	return &entry, nil
+}
+
+func ParseBlockDirectories(reader io.Reader) {
+
 }
 
 type Inode struct {
@@ -236,6 +325,15 @@ type Dir2SfHdr struct {
 
 const XFS_DIR2_DATA_FD_COUNT = 3
 
+type Dir2Block struct {
+	Header  Dir3DataHdr
+	Entries []Dir2DataEntry
+
+	// UnusedEntries []Dir2DataUnused
+	// Leafs []Dir2LeafEntry
+	// Tail Dir2BlockTail
+}
+
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L320-L324
 type Dir3DataHdr struct {
 	Dir3BlkHdr
@@ -253,6 +351,39 @@ type Dir3BlkHdr struct {
 	Owner    uint64
 }
 
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L353-L358
+type Dir2DataUnused struct {
+	Freetag uint16
+	Length  uint16
+	Padding uint16
+	Tag     uint16
+}
+
+type Dir2DataFree struct {
+	Offset uint16
+	Length uint16
+}
+
+/*
+Filetypes:
+    1   Regular file
+    2   Directory
+    3   Character special device
+    4   Block special device
+    5   FIFO
+    6   Socket
+    7   Symlink
+*/
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
+type Dir2SfEntry struct {
+	Namelen  uint8
+	Offset   [2]uint8
+	Name     string
+	Filetype uint8
+	Inumber  uint32
+}
+
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L339-L345
 type Dir2DataEntry struct {
 	Inumber  uint64
@@ -262,29 +393,12 @@ type Dir2DataEntry struct {
 	Tag      uint16
 }
 
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L353-L358
-type Dir2DataUnused struct {
-	Freetag uint16
-	Length  uint16
-	Tag     uint16
-}
-
-type Dir2DataFree struct {
-	Offset uint16
-	Length uint16
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
-type Dir2SfEntry struct {
-	Namelen uint8
-	Offset  [2]uint8
-	Name    string
-	Ftype   uint8 // 1: File? 2: Directory?
-	Inumber uint32
-}
-
 func (e Dir2SfEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name, e.Ftype, e.Inumber)
+	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name, e.Filetype, e.Inumber)
+}
+
+func (e Dir2DataEntry) String() string {
+	return fmt.Sprintf("%20s (type: %d, inode: %d tag: %x)", e.Name, e.Filetype, e.Inumber, e.Tag)
 }
 
 type Device struct{}

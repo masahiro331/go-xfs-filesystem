@@ -84,3 +84,15 @@ func (sb SuperBlock) InodeAbsOffset(inodeNumber uint32) uint64 {
 
 	return offset
 }
+
+func (sb SuperBlock) BlockToAgNumber(n uint64) uint64 {
+	return n >> uint64(sb.Agdlklog)
+}
+
+func (sb SuperBlock) BlockToAgBlockNumber(n uint64) uint64 {
+	return n & Mask64Lo(int(sb.Agdlklog))
+}
+
+func (sb SuperBlock) BlockToPhysicalOffset(n uint64) uint64 {
+	return sb.BlockToAgNumber(n)*uint64(sb.Agblocks) + sb.BlockToAgBlockNumber(n)
+}

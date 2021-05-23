@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	INODE = "inode"
-	LS    = "ls"
-	CAT   = "cat"
-	CD    = "cd"
-	DEBUG = "debug"
-	TREE  = "tree"
+	INODE  = "inode"
+	LS     = "ls"
+	CAT    = "cat"
+	CD     = "cd"
+	DEBUG  = "debug"
+	TREE   = "tree"
+	SEARCH = "search"
 )
 
 func main() {
@@ -81,6 +82,11 @@ func run(filename string) error {
 				}
 			case TREE:
 				// s, err = fs.Tree(commands...)
+			case SEARCH:
+				s, err = fs.Search(commands...)
+				if err != nil {
+					err = xerrors.Errorf("search: %s", err)
+				}
 			case DEBUG:
 				fs.Debug(commands...)
 			default:

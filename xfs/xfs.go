@@ -1,7 +1,10 @@
 package xfs
 
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -49,6 +52,18 @@ func NewFileSystem(f *os.File) (*FileSystem, error) {
 func (fs *FileSystem) seekInode(n uint32) {
 	fs.file.Seek(int64(fs.PrimaryAG.SuperBlock.InodeAbsOffset(n)), 0)
 }
+func (fs *FileSystem) seekBlock(n uint32) {
+	fs.file.Seek(int64(n*fs.PrimaryAG.SuperBlock.BlockSize), 0)
+}
+func (fs *FileSystem) readBlock(count uint32) ([]byte, error) {
+	buf := make([]byte, fs.PrimaryAG.SuperBlock.BlockSize*count)
+	_, err := fs.file.Read(buf)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read file error: %w", err)
+	}
+
+	return buf, err
+}
 
 func (fs *FileSystem) ListSegments(commands ...string) (string, error) {
 	var ret string
@@ -71,19 +86,55 @@ func (fs *FileSystem) ListSegments(commands ...string) (string, error) {
 	if err != nil {
 		return "", xerrors.Errorf("failed to parse inode: %w", err)
 	}
-	if inode.directoryLocal == nil {
-		return "", xerrors.Errorf("error inode directory local is null, extents: %+v", inode.directoryExtents)
-	}
-
-	for _, entry := range inode.directoryLocal.entries {
-		fs.seekInode(entry.Inumber)
-		inode, err := ParseInode(fs.file, int64(fs.PrimaryAG.SuperBlock.Inodesize))
-		if err != nil {
-			return "", xerrors.Errorf("failed to parse child inode: %w", err)
+	if inode.directoryLocal != nil {
+		for _, entry := range inode.directoryLocal.entries {
+			fs.seekInode(entry.Inumber)
+			inode, err := ParseInode(fs.file, int64(fs.PrimaryAG.SuperBlock.Inodesize))
+			if err != nil {
+				return "", xerrors.Errorf("failed to parse child inode: %w", err)
+			}
+			ret += fmt.Sprintf("%s: (mode: %d)\n", entry, inode.inodeCore.Mode)
 		}
-		ret += fmt.Sprintf("%s: (mode: %d)\n", entry, inode.inodeCore.Mode)
+		return ret, nil
 	}
-	return ret, nil
+	if inode.directoryExtents != nil {
+		if len(inode.directoryExtents.bmbtRecs) == 0 {
+			panic("directory extents tree bmbtRecs is empty error")
+		}
+		for _, b := range inode.directoryExtents.bmbtRecs {
+			p := b.Unpack()
+			physicalBlockOffset := fs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
+
+			fs.seekBlock(uint32(physicalBlockOffset))
+			buf, err := fs.readBlock(uint32(p.BlockCount))
+			if err != nil {
+				return "", xerrors.Errorf("failed to read block error: %w", err)
+			}
+			block, err := parseDir2Block(bytes.NewReader(buf), fs.PrimaryAG.SuperBlock.BlockSize*uint32(p.BlockCount))
+			if err != nil {
+				if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
+					return "", xerrors.Errorf("failed to parse dir2 block: %w", err)
+				}
+			}
+			if block == nil {
+				break
+			}
+
+			for _, entry := range block.Entries {
+				ret += fmt.Sprintf("%s\n", entry)
+
+				// TODO: support extends attribute
+				// fs.seekInode(uint32(entry.Inumber))
+				// inode, err := ParseInode(fs.file, int64(fs.PrimaryAG.SuperBlock.Inodesize))
+				// if err != nil {
+				// 	return "", xerrors.Errorf("failed to parse child inode: %w", err)
+				// }
+				// ret += fmt.Sprintf("%s: (mode: %d)\n", entry, inode.inodeCore.Mode)
+			}
+		}
+		return ret, nil
+	}
+	return "", xerrors.Errorf("error inode directory is null: %+v", inode)
 }
 
 func (fs *FileSystem) Catenate() {
@@ -119,7 +170,7 @@ func (fs *FileSystem) Debug(commands ...string) {
 	if err != nil {
 		panic("debug arguments error: " + commands[1])
 	}
-	fs.file.Seek(int64(offset), 0)
+	fs.seekBlock(uint32(offset))
 	utils.DebugBlock(utils.ReadBlock(fs.file))
 }
 
@@ -152,7 +203,7 @@ func (fs *FileSystem) listEntry(n uint32) (map[string]uint32, error) {
 		return nil, xerrors.Errorf("failed to parse inode: %w", err)
 	}
 	if inode.directoryLocal == nil {
-		return nil, xerrors.Errorf("error inode directory local is null, extents: %+v", inode.directoryExtents)
+		return nil, xerrors.Errorf("error inode directory local is null: %+v", inode)
 	}
 
 	nameInodeMap := map[string]uint32{}
@@ -164,4 +215,36 @@ func (fs *FileSystem) listEntry(n uint32) (map[string]uint32, error) {
 
 func (fs *FileSystem) Tree() {
 
+}
+
+func (fs *FileSystem) Search(commands ...string) (string, error) {
+	var retStr string
+	if len(commands) != 2 {
+		return "", xerrors.New("invalid arguments error: search [hex string]")
+	}
+	hexBytes, err := hex.DecodeString(commands[1])
+	if err != nil {
+		return "", xerrors.Errorf("failed to parse hex string: %w", err)
+	}
+
+	var count int
+	fs.file.Seek(0, 0)
+	for {
+		buf, err := fs.readBlock(1)
+		if err != nil {
+			if xerrors.Is(err, io.EOF) {
+				break
+			}
+			return "", xerrors.Errorf("failed to read file(count: %d): %w", count, err)
+		}
+		i := bytes.Index(buf, hexBytes)
+		if i >= 0 {
+			retStr += fmt.Sprintf("found(%x) block count: %d, offset: %d\n", buf[i:i+len(hexBytes)], count, i)
+		}
+		count++
+	}
+	if retStr != "" {
+		return retStr, nil
+	}
+	return fmt.Sprintf("%v bytes are not found", hexBytes), nil
 }
