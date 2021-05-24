@@ -15,6 +15,8 @@ import (
 
 const (
 	BMBT_EXNTFLAG_BITLEN = 1
+	INODEV3_SIZE         = 176
+	INODE_SIZE           = 96
 )
 
 const (
@@ -104,13 +106,19 @@ func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
 		panic("not support")
 	}
 
-	if inode.inodeCore.Forkoff != 0 {
-		panic("has extend attribute fork")
-	}
+	// TODO: support extend attribute fork , see. Chapter 19 Extended Attributes
+	// if inode.inodeCore.Forkoff != 0 {
+	// 	fmt.Printf("%+v\n", inode.inodeCore)
+	// 	panic("has extend attribute fork")
+	// }
 
 	// TODO: Need parse extended attribute fork.
 	ioutil.ReadAll(r)
 	return &inode, nil
+}
+
+func (i *Inode) AttributeOffset() uint32 {
+	return uint32(i.inodeCore.Forkoff)*8 + INODEV3_SIZE
 }
 
 func (i *Inode) String() string {

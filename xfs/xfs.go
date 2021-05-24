@@ -121,15 +121,12 @@ func (fs *FileSystem) ListSegments(commands ...string) (string, error) {
 			}
 
 			for _, entry := range block.Entries {
-				ret += fmt.Sprintf("%s\n", entry)
-
-				// TODO: support extends attribute
-				// fs.seekInode(uint32(entry.Inumber))
-				// inode, err := ParseInode(fs.file, int64(fs.PrimaryAG.SuperBlock.Inodesize))
-				// if err != nil {
-				// 	return "", xerrors.Errorf("failed to parse child inode: %w", err)
-				// }
-				// ret += fmt.Sprintf("%s: (mode: %d)\n", entry, inode.inodeCore.Mode)
+				fs.seekInode(uint32(entry.Inumber))
+				inode, err := ParseInode(fs.file, int64(fs.PrimaryAG.SuperBlock.Inodesize))
+				if err != nil {
+					return "", xerrors.Errorf("failed to parse child inode: %w", err)
+				}
+				ret += fmt.Sprintf("%s: (mode: %d)\n", entry, inode.inodeCore.Mode)
 			}
 		}
 		return ret, nil
