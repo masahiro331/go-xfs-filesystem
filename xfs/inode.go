@@ -159,13 +159,19 @@ const (
 	FreeTag = 0xffff
 )
 
-func parseDir2Block(reader io.Reader, blockSize uint32) (*Dir2Block, error) {
+func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	block := Dir2Block{}
-	r := io.LimitReader(reader, int64(blockSize))
 
+	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(bmbtIrec.StartBlock)
+	xfs.seekBlock(physicalBlockOffset)
+	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.BlockSize*uint32(bmbtIrec.BlockCount)))
 	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
 		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
 	}
+	if block.Header.Magic == 0x58444233 {
+		panic("support XDB3")
+	}
+
 	if block.Header.Magic != 0x58444433 { // XDD3
 		return nil, xerrors.Errorf("failed to parse header error magic: %v: %w", block.Header.Magic, UnsupportedDir2BlockHeaderErr)
 	}
@@ -373,33 +379,22 @@ type Dir2DataFree struct {
 	Length uint16
 }
 
-/*
-Filetypes:
-    1   Regular file
-    2   Directory
-    3   Character special device
-    4   Block special device
-    5   FIFO
-    6   Socket
-    7   Symlink
-*/
-
-func (e *Dir2SfEntry) FileType() uint8 {
+func (e Dir2SfEntry) FileType() uint8 {
 	return e.Filetype
 }
-func (e *Dir2DataEntry) FileType() uint8 {
+func (e Dir2DataEntry) FileType() uint8 {
 	return e.Filetype
 }
-func (e *Dir2SfEntry) Name() string {
+func (e Dir2SfEntry) Name() string {
 	return e.EntryName
 }
-func (e *Dir2DataEntry) Name() string {
+func (e Dir2DataEntry) Name() string {
 	return e.EntryName
 }
-func (e *Dir2SfEntry) InodeNumber() uint64 {
+func (e Dir2SfEntry) InodeNumber() uint64 {
 	return uint64(e.Inumber)
 }
-func (e *Dir2DataEntry) InodeNumber() uint64 {
+func (e Dir2DataEntry) InodeNumber() uint64 {
 	return e.Inumber
 }
 

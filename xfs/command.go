@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 
 	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
@@ -136,19 +137,12 @@ func (xfs *FileSystem) ListSegments(commands ...string) (string, error) {
 			panic("directory extents tree bmbtRecs is empty error")
 		}
 		for _, b := range inode.directoryExtents.bmbtRecs {
-			p := b.Unpack()
-			physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
-
-			xfs.seekBlock(physicalBlockOffset)
-			buf, err := xfs.readBlock(uint32(p.BlockCount))
-			if err != nil {
-				return "", xerrors.Errorf("failed to read block error: %w", err)
-			}
-			block, err := parseDir2Block(bytes.NewReader(buf), xfs.PrimaryAG.SuperBlock.BlockSize*uint32(p.BlockCount))
+			block, err := xfs.parseDir2Block(b.Unpack())
 			if err != nil {
 				if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
 					return "", xerrors.Errorf("failed to parse dir2 block: %w", err)
 				}
+				log.Fatal(err)
 			}
 			if block == nil {
 				break
