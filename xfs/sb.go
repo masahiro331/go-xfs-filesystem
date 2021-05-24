@@ -62,20 +62,20 @@ type SuperBlock struct {
 }
 
 // return (AG number), (Inode Block), (Inode Offset)
-func (sb SuperBlock) InodeOffset(inodeNumber uint32) (int, uint64, uint64) {
+func (sb SuperBlock) InodeOffset(inodeNumber uint64) (int, uint64, uint64) {
 	offsetAddress := sb.Inopblog + sb.Agdlklog
 	lowMask := (1<<(offsetAddress) - 1)
 	AGNumber := inodeNumber >> uint32(offsetAddress)
 
-	relativeInodeNumber := inodeNumber & uint32(lowMask)
-	InodeBlock := relativeInodeNumber / uint32(sb.Inopblock)
-	InodeOffset := relativeInodeNumber % uint32(sb.Inopblock)
+	relativeInodeNumber := inodeNumber & uint64(lowMask)
+	InodeBlock := relativeInodeNumber / uint64(sb.Inopblock)
+	InodeOffset := relativeInodeNumber % uint64(sb.Inopblock)
 
 	return int(AGNumber), uint64(InodeBlock), uint64(InodeOffset)
 }
 
 // return Offset
-func (sb SuperBlock) InodeAbsOffset(inodeNumber uint32) uint64 {
+func (sb SuperBlock) InodeAbsOffset(inodeNumber uint64) uint64 {
 	agNumber, blockCount, inodeOffset := sb.InodeOffset(inodeNumber)
 
 	offset := (uint64(agNumber) * uint64(sb.Agblocks*sb.BlockSize)) +
@@ -93,6 +93,6 @@ func (sb SuperBlock) BlockToAgBlockNumber(n uint64) uint64 {
 	return n & Mask64Lo(int(sb.Agdlklog))
 }
 
-func (sb SuperBlock) BlockToPhysicalOffset(n uint64) uint64 {
-	return sb.BlockToAgNumber(n)*uint64(sb.Agblocks) + sb.BlockToAgBlockNumber(n)
+func (sb SuperBlock) BlockToPhysicalOffset(n uint64) int64 {
+	return int64(sb.BlockToAgNumber(n)*uint64(sb.Agblocks) + sb.BlockToAgBlockNumber(n))
 }

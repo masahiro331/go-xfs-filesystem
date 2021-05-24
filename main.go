@@ -14,7 +14,7 @@ import (
 const (
 	INODE  = "inode"
 	LS     = "ls"
-	CAT    = "cat"
+	PRINT  = "print"
 	CD     = "cd"
 	DEBUG  = "debug"
 	TREE   = "tree"
@@ -68,8 +68,11 @@ func run(filename string) error {
 				if err != nil {
 					err = xerrors.Errorf("cd: %s", err)
 				}
-			case CAT:
-				fs.Catenate()
+			case PRINT:
+				s, err = fs.Print(commands...)
+				if err != nil {
+					err = xerrors.Errorf("print: %s", err)
+				}
 			case LS:
 				s, err = fs.ListSegments(commands...)
 				if err != nil {
@@ -81,7 +84,7 @@ func run(filename string) error {
 					err = xerrors.Errorf("inode: %s", err)
 				}
 			case TREE:
-				// s, err = fs.Tree(commands...)
+				s, err = fs.Tree(commands...)
 			case SEARCH:
 				s, err = fs.Search(commands...)
 				if err != nil {

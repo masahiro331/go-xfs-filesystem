@@ -29,8 +29,9 @@ const (
 	XFS_DINODE_FMT_RMAP
 )
 
-func ParseInode(reader io.Reader, inodeSize int64) (*Inode, error) {
-	r := io.LimitReader(reader, inodeSize)
+func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
+	xfs.seekInode(ino)
+	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.Inodesize))
 
 	inode := Inode{}
 
@@ -206,7 +207,7 @@ func parseDir2Block(reader io.Reader, blockSize uint32) (*Dir2Block, error) {
 		if n != int(entry.Namelen) {
 			return nil, xerrors.Errorf("failed to read name: expected namelen(%d) actual(%d)", entry.Namelen, n)
 		}
-		entry.Name = string(nameBuf)
+		entry.EntryName = string(nameBuf)
 
 		if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
 			return nil, xerrors.Errorf("failed to read file type: %w", err)
@@ -252,7 +253,7 @@ func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 	if i != int(entry.Namelen) {
 		return nil, errors.New("")
 	}
-	entry.Name = string(buf)
+	entry.EntryName = string(buf)
 	if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
 		return nil, err
 	}
@@ -383,30 +384,58 @@ Filetypes:
     7   Symlink
 */
 
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
-type Dir2SfEntry struct {
-	Namelen  uint8
-	Offset   [2]uint8
-	Name     string
-	Filetype uint8
-	Inumber  uint32
+func (e *Dir2SfEntry) FileType() uint8 {
+	return e.Filetype
+}
+func (e *Dir2DataEntry) FileType() uint8 {
+	return e.Filetype
+}
+func (e *Dir2SfEntry) Name() string {
+	return e.EntryName
+}
+func (e *Dir2DataEntry) Name() string {
+	return e.EntryName
+}
+func (e *Dir2SfEntry) InodeNumber() uint64 {
+	return uint64(e.Inumber)
+}
+func (e *Dir2DataEntry) InodeNumber() uint64 {
+	return e.Inumber
+}
+
+var _ Entry = &Dir2DataEntry{}
+var _ Entry = &Dir2SfEntry{}
+
+type Entry interface {
+	Name() string
+	FileType() uint8
+	InodeNumber() uint64
 }
 
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L339-L345
 type Dir2DataEntry struct {
-	Inumber  uint64
-	Namelen  uint8
-	Name     string
-	Filetype uint8
-	Tag      uint16
+	Inumber   uint64
+	Namelen   uint8
+	EntryName string
+	Filetype  uint8
+	Tag       uint16
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
+type Dir2SfEntry struct {
+	Namelen   uint8
+	Offset    [2]uint8
+	EntryName string
+	Filetype  uint8
+	Inumber   uint32
 }
 
 func (e Dir2SfEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name, e.Filetype, e.Inumber)
+	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name(), e.Filetype, e.Inumber)
 }
 
 func (e Dir2DataEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d tag: %x)", e.Name, e.Filetype, e.Inumber, e.Tag)
+	return fmt.Sprintf("%20s (type: %d, inode: %d tag: %x)", e.Name(), e.Filetype, e.Inumber, e.Tag)
 }
 
 type Device struct{}
