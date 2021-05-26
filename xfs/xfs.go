@@ -1,8 +1,11 @@
 package xfs
 
 import (
+	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +17,8 @@ var _ fs.FS = &FileSystem{}
 var _ fs.File = &File{}
 var _ fs.FileInfo = &FileInfo{}
 var _ fs.DirEntry = dirEntry{}
+var _ fs.ReadDirFS = &FileSystem{}
+var _ fs.StatFS = &FileSystem{}
 
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {
@@ -28,16 +33,42 @@ type FileSystem struct {
 // File is implemented io/fs File interface
 type File struct {
 	fs *FileSystem
+	FileInfo
 
-	inode uint32
+	buffer *bytes.Buffer
+}
+
+func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
+	f, err := xfs.Open(name)
+	if err != nil {
+		return FileInfo{}, err
+	}
+
+	return f.Stat()
 }
 
 func (f *File) Stat() (fs.FileInfo, error) {
-	return &FileInfo{}, nil
+	return &f.FileInfo, nil
 }
 
 func (f *File) Read(buf []byte) (int, error) {
-	return 0, nil
+	return f.buffer.Read(buf)
+}
+
+func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
+	var buf []byte
+	for _, rec := range inode.regularExtent.bmbtRecs {
+		p := rec.Unpack()
+		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
+		xfs.seekBlock(physicalBlockOffset)
+		b, err := xfs.readBlock(uint32(p.BlockCount))
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read block: %w", err)
+		}
+
+		buf = append(buf, b...)
+	}
+	return buf, nil
 }
 
 func (f *File) Close() error {
@@ -46,7 +77,7 @@ func (f *File) Close() error {
 
 // dirEntry is implemented io/fs DirEntry interface
 type dirEntry struct {
-	fs.FileInfo
+	FileInfo
 }
 
 func (d dirEntry) Type() fs.FileMode { return d.FileInfo.Mode().Type() }
@@ -90,20 +121,35 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		return nil, xfs.wrapError(op, name, fs.ErrInvalid)
 	}
 
-	// dirName, fileName := path.Split(name)
+	dirName, fileName := path.Split(name)
+	dirEntries, err := xfs.ReadDir(dirName)
+	if err != nil {
+		return nil, xfs.wrapError(op, name, xerrors.Errorf("railed to read directory: %w", err))
+	}
+	fmt.Println(dirEntries)
 
-	// dirs := strings.Split(strings.Trim(dirName, string(filepath.Separator)), string(filepath.Separator))
-	// for _, dir := range dirs {
-	// 	inodeNameMap, err := xfs.listEntry(xfs.PrimaryAG.SuperBlock.Rootino)
-	// 	if err != nil {
-	// 		return nil, xfs.wrapError(op, name, err)
-	// 	}
-	// }
+	for _, entry := range dirEntries {
+		if !entry.IsDir() && entry.Name() == fileName {
+			fmt.Println("========")
+			if dir, ok := entry.(dirEntry); ok {
+				if dir.inode.regularExtent == nil {
+					return nil, xerrors.Errorf("regular extent empty", fs.ErrNotExist)
+				}
 
-	// If file is not exist or directory, return fs.ErrNotExist
-	// return nil, fs.ErrNotExist
+				buf, err := xfs.newFile(dir.inode)
+				if err != nil {
+					return nil, xerrors.Errorf("failed to new file: %w", err)
+				}
 
-	return &File{}, nil
+				return &File{
+					fs:       xfs,
+					FileInfo: dir.FileInfo,
+					buffer:   bytes.NewBuffer(buf),
+				}, nil
+			}
+		}
+	}
+	return nil, fs.ErrNotExist
 }
 
 func (xfs *FileSystem) Glob(pattern string) ([]string, error) {
@@ -195,10 +241,25 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 		return nil, xerrors.Errorf("failed to get root inode: %w", err)
 	}
 
+	fileInfos, err := xfs.listFileInfo(inode.inodeCore.Ino)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to list directory entries inode: %d: %w", inode.inodeCore.Ino, err)
+	}
+
 	currentInode := inode
 	dirs := strings.Split(strings.Trim(name, string(filepath.Separator)), string(filepath.Separator))
 	for i, dir := range dirs {
-		fileInfos, err := xfs.listFileInfo(currentInode.inodeCore.Ino)
+		for _, fileInfo := range fileInfos {
+			if fileInfo.Name() == dir {
+				if !fileInfo.IsDir() {
+					return nil, xerrors.Errorf("%s is file, directory: %w", fileInfo.Name(), fs.ErrNotExist)
+				}
+				currentInode = fileInfo.inode
+				break
+			}
+		}
+
+		fileInfos, err = xfs.listFileInfo(currentInode.inodeCore.Ino)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to list directory entries inode: %d: %w", inode.inodeCore.Ino, err)
 		}
@@ -210,16 +271,6 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 				dirEntries = append(dirEntries, dirEntry{fileInfo})
 			}
 			return dirEntries, nil
-		}
-
-		for _, fileInfo := range fileInfos {
-			if fileInfo.Name() == dir {
-				if !fileInfo.IsDir() {
-					return nil, xerrors.Errorf("%s is file, directory: %w", fileInfo.Name(), fs.ErrNotExist)
-				}
-				currentInode = fileInfo.inode
-				break
-			}
 		}
 	}
 	return nil, fs.ErrNotExist
