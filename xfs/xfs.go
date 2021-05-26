@@ -2,7 +2,6 @@ package xfs
 
 import (
 	"bytes"
-	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -126,11 +125,9 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, xfs.wrapError(op, name, xerrors.Errorf("railed to read directory: %w", err))
 	}
-	fmt.Println(dirEntries)
 
 	for _, entry := range dirEntries {
 		if !entry.IsDir() && entry.Name() == fileName {
-			fmt.Println("========")
 			if dir, ok := entry.(dirEntry); ok {
 				if dir.inode.regularExtent == nil {
 					return nil, xerrors.Errorf("regular extent empty", fs.ErrNotExist)
