@@ -1,7 +1,6 @@
 package xfs
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -177,7 +176,6 @@ func (xfs *FileSystem) seekInode(n uint64) {
 }
 
 func (xfs *FileSystem) seekBlock(n int64) {
-	fmt.Println(n * int64(xfs.PrimaryAG.SuperBlock.BlockSize))
 	xfs.file.Seek(n*int64(xfs.PrimaryAG.SuperBlock.BlockSize), 0)
 }
 
@@ -216,7 +214,7 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 
 		for _, fileInfo := range fileInfos {
 			if fileInfo.Name() == dir {
-				if fileInfo.IsDir() {
+				if !fileInfo.IsDir() {
 					return nil, xerrors.Errorf("%s is file, directory: %w", fileInfo.Name(), fs.ErrNotExist)
 				}
 				currentInode = fileInfo.inode

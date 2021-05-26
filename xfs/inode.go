@@ -17,6 +17,24 @@ const (
 	BMBT_EXNTFLAG_BITLEN = 1
 	INODEV3_SIZE         = 176
 	INODE_SIZE           = 96
+
+	XFS_DIR2_DATA_FD_COUNT  = 3
+	XFS_DIR2_DATA_FREE_TAG  = 0xffff
+	XFS_DIR2_DATA_ALIGN_LOG = 3
+
+	LEAF_ENTRY_SIZE = 8
+
+	// Block Directory Magic number
+	XDB3 = 0x58444233
+
+	// Leaf Directory Magic number
+	XDD3 = 0x58444433
+)
+
+const (
+	XFS_DIR2_DATA_SPACE = iota
+	XFS_DIR2_LEAF_SPACE
+	XFS_DIR2_FREE_SPACE
 )
 
 const (
@@ -27,6 +45,13 @@ const (
 	XFS_DINODE_FMT_BTREE
 	XFS_DINODE_FMT_UUID
 	XFS_DINODE_FMT_RMAP
+)
+
+var (
+	XFS_DIR2_SPACE_SIZE  = 1 << (32 + XFS_DIR2_DATA_ALIGN_LOG)
+	XFS_DIR2_DATA_OFFSET = XFS_DIR2_DATA_SPACE * XFS_DIR2_SPACE_SIZE
+	XFS_DIR2_LEAF_OFFSET = XFS_DIR2_LEAF_SPACE * XFS_DIR2_SPACE_SIZE
+	XFS_DIR2_FREE_OFFSET = XFS_DIR2_FREE_SPACE * XFS_DIR2_SPACE_SIZE
 )
 
 func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
@@ -159,23 +184,88 @@ const (
 	FreeTag = 0xffff
 )
 
-func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
-	block := Dir2Block{}
-
-	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(bmbtIrec.StartBlock)
-	xfs.seekBlock(physicalBlockOffset)
-	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.BlockSize*uint32(bmbtIrec.BlockCount)))
-	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
-		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
+func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
+	buf, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read XDB3 block reader: %w", err)
 	}
-	if block.Header.Magic == 0x58444233 {
-		panic("support XDB3")
+	var tail Dir2BlockTail
+	tailReader := bytes.NewReader(buf[len(buf)-int(unsafe.Sizeof(tail)):])
+	if err := binary.Read(tailReader, binary.BigEndian, &tail); err != nil {
+		return nil, xerrors.Errorf("failed to read tail binary: %w", err)
 	}
+	reader := bytes.NewReader(buf[:uint32(len(buf))-((tail.Count*LEAF_ENTRY_SIZE)+uint32(unsafe.Sizeof(tail)))])
 
-	if block.Header.Magic != 0x58444433 { // XDD3
-		return nil, xerrors.Errorf("failed to parse header error magic: %v: %w", block.Header.Magic, UnsupportedDir2BlockHeaderErr)
+	entries := []Dir2DataEntry{}
+	for {
+		entry := Dir2DataEntry{}
+
+		ino := make([]byte, unsafe.Sizeof(entry.Inumber))
+		_, err := reader.Read(ino)
+		if err != nil {
+			if err == io.EOF {
+				return entries, nil
+			}
+			return nil, xerrors.Errorf("failed to read inumber: %w", err)
+		}
+
+		if err := binary.Read(bytes.NewReader(ino), binary.BigEndian, &entry.Inumber); err != nil {
+			return nil, xerrors.Errorf("failed to read inumber binary: %w", err)
+		}
+		if (entry.Inumber >> 48) == FreeTag {
+			freeLen := (entry.Inumber >> 32) & Mask64Lo(16)
+			if freeLen != 8 {
+				// Read FreeTag tail
+				_, err := reader.Read(make([]byte, freeLen-0x08))
+				if err != nil {
+					return nil, xerrors.Errorf("failed to read unused padding: %w", err)
+				}
+			}
+			continue
+		}
+		if err := binary.Read(reader, binary.BigEndian, &entry.Namelen); err != nil {
+
+			return nil, xerrors.Errorf("failed to read name length: %w", err)
+		}
+		nameBuf := make([]byte, entry.Namelen)
+		n, err := reader.Read(nameBuf)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read name: %w", err)
+		}
+		if n != int(entry.Namelen) {
+			return nil, xerrors.Errorf("failed to read name: expected namelen(%d) actual(%d)", entry.Namelen, n)
+		}
+		entry.EntryName = string(nameBuf)
+
+		if err := binary.Read(reader, binary.BigEndian, &entry.Filetype); err != nil {
+			return nil, xerrors.Errorf("failed to read file type: %w", err)
+		}
+
+		// 12 = Inumber + Namelen + Filetype + Tag
+		// 8  = Alignment
+		align := (int(unsafe.Sizeof(entry.Inumber)) +
+			int(unsafe.Sizeof(entry.Namelen)) +
+			int(unsafe.Sizeof(entry.Filetype)) +
+			int(unsafe.Sizeof(entry.Tag)) + n) % 8
+		if align != 0 {
+			n, err = reader.Read(make([]byte, 8-align))
+			if err != nil {
+				return nil, xerrors.Errorf("failed to read alignment: %w", err)
+			}
+			if n != int(8-align) {
+				return nil, xerrors.Errorf("failed to read alignment: expected namelen(%d) actual(%d)", entry.Namelen, n)
+			}
+		}
+
+		if err := binary.Read(reader, binary.BigEndian, &entry.Tag); err != nil {
+			return nil, xerrors.Errorf("failed to read tag: %w", err)
+		}
+		entries = append(entries, entry)
 	}
+}
 
+func (xfs *FileSystem) parseXDD3Block(r io.Reader) ([]Dir2DataEntry, error) {
+	entries := []Dir2DataEntry{}
 	for {
 		entry := Dir2DataEntry{}
 
@@ -183,10 +273,11 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 		_, err := r.Read(ino)
 		if err != nil {
 			if err == io.EOF {
-				return &block, nil
+				return entries, nil
 			}
 			return nil, xerrors.Errorf("failed to read inumber: %w", err)
 		}
+
 		if err := binary.Read(bytes.NewReader(ino), binary.BigEndian, &entry.Inumber); err != nil {
 			return nil, xerrors.Errorf("failed to read inumber binary: %w", err)
 		}
@@ -238,8 +329,41 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 		if err := binary.Read(r, binary.BigEndian, &entry.Tag); err != nil {
 			return nil, xerrors.Errorf("failed to read tag: %w", err)
 		}
-		block.Entries = append(block.Entries, entry)
+		entries = append(entries, entry)
 	}
+}
+
+func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
+	block := Dir2Block{}
+	if bmbtIrec.StartBlock >= uint64(XFS_DIR2_LEAF_OFFSET) {
+		// Skip Leaf and Free node
+		return &block, nil
+	}
+
+	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(bmbtIrec.StartBlock)
+	xfs.seekBlock(physicalBlockOffset)
+	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.BlockSize*uint32(bmbtIrec.BlockCount)))
+	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
+		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
+	}
+
+	var err error
+	switch block.Header.Magic {
+	case XDD3:
+		block.Entries, err = xfs.parseXDD3Block(r)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse XDD3 block: %w", err)
+		}
+	case XDB3:
+		block.Entries, err = xfs.parseXDB3Block(r)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse XDB3 block: %w", err)
+		}
+	default:
+		return nil, xerrors.Errorf("failed to parse header error magic: %v: %w", block.Header.Magic, UnsupportedDir2BlockHeaderErr)
+	}
+
+	return &block, nil
 }
 
 func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
@@ -338,15 +462,23 @@ type Dir2SfHdr struct {
 	Parent  uint32
 }
 
-const XFS_DIR2_DATA_FD_COUNT = 3
-
 type Dir2Block struct {
 	Header  Dir3DataHdr
 	Entries []Dir2DataEntry
 
-	// UnusedEntries []Dir2DataUnused
-	// Leafs []Dir2LeafEntry
-	// Tail Dir2BlockTail
+	UnusedEntries []Dir2DataUnused
+	Leafs         []Dir2LeafEntry
+	Tail          Dir2BlockTail
+}
+
+type Dir2BlockTail struct {
+	Count uint32
+	Stale uint32
+}
+
+type Dir2LeafEntry struct {
+	Hashval uint32
+	Address uint32
 }
 
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L320-L324
@@ -370,8 +502,8 @@ type Dir3BlkHdr struct {
 type Dir2DataUnused struct {
 	Freetag uint16
 	Length  uint16
-	Padding uint16
-	Tag     uint16
+	/* variable offset */
+	Tag uint16
 }
 
 type Dir2DataFree struct {

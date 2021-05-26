@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 
 	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
@@ -74,7 +73,7 @@ func (fs *FileSystem) Debug(commands ...string) {
 	if err != nil {
 		panic("debug arguments error: " + commands[1])
 	}
-	fs.seekBlock(int64(offset) * int64(fs.PrimaryAG.SuperBlock.BlockSize))
+	fs.seekBlock(int64(offset))
 	utils.DebugBlock(utils.ReadBlock(fs.file))
 }
 
@@ -142,7 +141,6 @@ func (xfs *FileSystem) ListSegments(commands ...string) (string, error) {
 				if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
 					return "", xerrors.Errorf("failed to parse dir2 block: %w", err)
 				}
-				log.Fatal(err)
 			}
 			if block == nil {
 				break
