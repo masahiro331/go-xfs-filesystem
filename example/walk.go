@@ -1,0 +1,50 @@
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"io/ioutil"
+	"log"
+	"os"
+
+	"github.com/masahiro331/go-xfs-filesystem/xfs"
+	"golang.org/x/xerrors"
+)
+
+func main() {
+	f, err := os.Open("/Users/masahiro331/work/go/src/github.com/masahiro331/go-xfs-filesystem/Linux.img")
+	if err != nil {
+		log.Fatal(err)
+	}
+	filesystem, err := xfs.NewFileSystem(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = fs.WalkDir(filesystem, "etc", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return xerrors.Errorf("file walk error: %w", err)
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		if path == "etc/os-release" {
+			file, err := filesystem.Open(path)
+			if err != nil {
+				return err
+			}
+			buf, err := ioutil.ReadAll(file)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(buf))
+			os.Exit(0)
+		}
+		return nil
+
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}

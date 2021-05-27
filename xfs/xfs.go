@@ -40,9 +40,12 @@ type File struct {
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	f, err := xfs.Open(name)
 	if err != nil {
-		return FileInfo{}, err
+		info, err := xfs.ReadDirInfo(name)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read dir info: %w", err)
+		}
+		return info, nil
 	}
-
 	return f.Stat()
 }
 
@@ -91,6 +94,21 @@ func (xfs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 		return nil, xfs.wrapError(op, name, err)
 	}
 	return dirEntries, nil
+}
+
+func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
+	dirs, dir := path.Split(name)
+	dirEntries, err := xfs.readDirEntry(dirs)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read dir entry: %w", err)
+	}
+	for _, entry := range dirEntries {
+		if entry.Name() == strings.Trim(dir, string(filepath.Separator)) {
+			return entry.Info()
+		}
+	}
+
+	return nil, fs.ErrNotExist
 }
 
 func (xfs *FileSystem) getRootInode() (*Inode, error) {
@@ -265,6 +283,12 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 		if i == len(dirs)-1 {
 			var dirEntries []fs.DirEntry
 			for _, fileInfo := range fileInfos {
+				// Skip current directory and parent directory
+				// infinit loop in walkDir
+				if fileInfo.Name() == "." || fileInfo.Name() == ".." {
+					continue
+				}
+
 				dirEntries = append(dirEntries, dirEntry{fileInfo})
 			}
 			return dirEntries, nil
