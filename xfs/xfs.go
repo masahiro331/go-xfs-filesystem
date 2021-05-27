@@ -12,12 +12,15 @@ import (
 	"golang.org/x/xerrors"
 )
 
-var _ fs.FS = &FileSystem{}
-var _ fs.File = &File{}
-var _ fs.FileInfo = &FileInfo{}
-var _ fs.DirEntry = dirEntry{}
-var _ fs.ReadDirFS = &FileSystem{}
-var _ fs.StatFS = &FileSystem{}
+var (
+	_ fs.FS        = &FileSystem{}
+	_ fs.ReadDirFS = &FileSystem{}
+	_ fs.StatFS    = &FileSystem{}
+
+	_ fs.File     = &File{}
+	_ fs.FileInfo = &FileInfo{}
+	_ fs.DirEntry = dirEntry{}
+)
 
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {

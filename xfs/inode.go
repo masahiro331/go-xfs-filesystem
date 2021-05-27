@@ -13,46 +13,191 @@ import (
 	"golang.org/x/xerrors"
 )
 
-const (
-	BMBT_EXNTFLAG_BITLEN = 1
-	INODEV3_SIZE         = 176
-	INODE_SIZE           = 96
-
-	XFS_DIR2_DATA_FD_COUNT  = 3
-	XFS_DIR2_DATA_FREE_TAG  = 0xffff
-	XFS_DIR2_DATA_ALIGN_LOG = 3
-
-	LEAF_ENTRY_SIZE = 8
-
-	// Block Directory Magic number
-	XDB3 = 0x58444233
-
-	// Leaf Directory Magic number
-	XDD3 = 0x58444433
-)
-
-const (
-	XFS_DIR2_DATA_SPACE = iota
-	XFS_DIR2_LEAF_SPACE
-	XFS_DIR2_FREE_SPACE
-)
-
-const (
-	// typedef enum xfs_dinode_fmt
-	XFS_DINODE_FMT_DEV = iota
-	XFS_DINODE_FMT_LOCAL
-	XFS_DINODE_FMT_EXTENTS
-	XFS_DINODE_FMT_BTREE
-	XFS_DINODE_FMT_UUID
-	XFS_DINODE_FMT_RMAP
-)
-
 var (
+	UnsupportedDir2BlockHeaderErr = xerrors.New("unsupported block")
+
 	XFS_DIR2_SPACE_SIZE  = 1 << (32 + XFS_DIR2_DATA_ALIGN_LOG)
 	XFS_DIR2_DATA_OFFSET = XFS_DIR2_DATA_SPACE * XFS_DIR2_SPACE_SIZE
 	XFS_DIR2_LEAF_OFFSET = XFS_DIR2_LEAF_SPACE * XFS_DIR2_SPACE_SIZE
 	XFS_DIR2_FREE_OFFSET = XFS_DIR2_FREE_SPACE * XFS_DIR2_SPACE_SIZE
+
+	_ Entry = &Dir2DataEntry{}
+	_ Entry = &Dir2SfEntry{}
 )
+
+type Inode struct {
+	inodeCore InodeCore
+	// Device
+	device *Device
+
+	// S_IFDIR
+	directoryLocal   *DirectoryLocal
+	directoryExtents *DirectoryExtents
+
+	// S_IFREG
+	regularExtent *RegularExtent
+
+	// S_IFLNK
+	symlinkString *SymlinkString
+}
+
+type RegularExtent struct {
+	bmbtRecs []BmbtRec
+}
+
+type DirectoryExtents struct {
+	bmbtRecs []BmbtRec
+}
+
+type DirectoryLocal struct {
+	dir2SfHdr Dir2SfHdr
+	entries   []Dir2SfEntry
+}
+
+// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1787
+type BmbtRec struct {
+	L0 uint64
+	L1 uint64
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_types.h#L162
+type BmbtIrec struct {
+	StartOff   uint64
+	StartBlock uint64
+	BlockCount uint64
+	State      uint8
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
+type Dir2SfHdr struct {
+	Count   uint8
+	I8Count uint8
+	Parent  uint32
+}
+
+type Dir2Block struct {
+	Header  Dir3DataHdr
+	Entries []Dir2DataEntry
+
+	UnusedEntries []Dir2DataUnused
+	Leafs         []Dir2LeafEntry
+	Tail          Dir2BlockTail
+}
+
+type Dir2BlockTail struct {
+	Count uint32
+	Stale uint32
+}
+
+type Dir2LeafEntry struct {
+	Hashval uint32
+	Address uint32
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L320-L324
+type Dir3DataHdr struct {
+	Dir3BlkHdr
+	Frees   [XFS_DIR2_DATA_FD_COUNT]Dir2DataFree
+	Padding uint32
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L311-L318
+type Dir3BlkHdr struct {
+	Magic    uint32
+	CRC      uint32
+	BlockNo  uint64
+	Lsn      uint64
+	MetaUUID [16]byte
+	Owner    uint64
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L353-L358
+type Dir2DataUnused struct {
+	Freetag uint16
+	Length  uint16
+	/* variable offset */
+	Tag uint16
+}
+
+type Dir2DataFree struct {
+	Offset uint16
+	Length uint16
+}
+
+type Entry interface {
+	Name() string
+	FileType() uint8
+	InodeNumber() uint64
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L339-L345
+type Dir2DataEntry struct {
+	Inumber   uint64
+	Namelen   uint8
+	EntryName string
+	Filetype  uint8
+	Tag       uint16
+}
+
+// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
+type Dir2SfEntry struct {
+	Namelen   uint8
+	Offset    [2]uint8
+	EntryName string
+	Filetype  uint8
+	Inumber   uint32
+}
+
+type Device struct{}
+
+type SymlinkString struct {
+	Name string
+}
+
+type InodeCore struct {
+	Magic        [2]byte
+	Mode         uint16
+	Version      uint8
+	Format       uint8
+	OnLink       uint16
+	UID          uint32
+	GID          uint32
+	NLink        uint32
+	ProjId       uint16
+	Padding      [8]byte
+	Flushiter    uint16
+	Atime        uint64
+	Mtime        uint64
+	Ctime        uint64
+	Size         uint64
+	Nblocks      uint64
+	Extsize      uint32
+	Nextents     uint32
+	Anextents    uint16
+	Forkoff      uint8
+	Aformat      uint8
+	Dmevmask     uint32
+	Dmstate      uint16
+	Flags        uint16
+	Gen          uint32
+	NextUnlinked uint32
+
+	CRC         uint32
+	Changecount uint64
+	Lsn         uint64
+	Flags2      uint64
+	Cowextsize  uint32
+	Padding2    [12]byte
+	Crtime      uint64
+	Ino         uint64
+	MetaUUID    [16]byte
+}
+
+type InobtRec struct {
+	Startino  uint32
+	Freecount uint32
+	Free      uint64
+}
 
 func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	xfs.seekInode(ino)
@@ -138,7 +283,6 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	// 	panic("has extend attribute fork")
 	// }
 
-	// TODO: Need parse extended attribute fork.
 	ioutil.ReadAll(r)
 	return &inode, nil
 }
@@ -178,12 +322,6 @@ func (i *Inode) String() string {
 	return s
 }
 
-var UnsupportedDir2BlockHeaderErr = xerrors.New("unsupported block")
-
-const (
-	FreeTag = 0xffff
-)
-
 func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
 	buf, err := ioutil.ReadAll(r)
 	if err != nil {
@@ -212,7 +350,7 @@ func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
 		if err := binary.Read(bytes.NewReader(ino), binary.BigEndian, &entry.Inumber); err != nil {
 			return nil, xerrors.Errorf("failed to read inumber binary: %w", err)
 		}
-		if (entry.Inumber >> 48) == FreeTag {
+		if (entry.Inumber >> 48) == XFS_DIR2_DATA_FREE_TAG {
 			freeLen := (entry.Inumber >> 32) & Mask64Lo(16)
 			if freeLen != 8 {
 				// Read FreeTag tail
@@ -281,7 +419,7 @@ func (xfs *FileSystem) parseXDD3Block(r io.Reader) ([]Dir2DataEntry, error) {
 		if err := binary.Read(bytes.NewReader(ino), binary.BigEndian, &entry.Inumber); err != nil {
 			return nil, xerrors.Errorf("failed to read inumber binary: %w", err)
 		}
-		if (entry.Inumber >> 48) == FreeTag {
+		if (entry.Inumber >> 48) == XFS_DIR2_DATA_FREE_TAG {
 			freeLen := (entry.Inumber >> 32) & Mask64Lo(16)
 			if freeLen != 8 {
 				// Read FreeTag tail
@@ -395,221 +533,6 @@ func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 	return &entry, nil
 }
 
-func ParseBlockDirectories(reader io.Reader) {
-
-}
-
-type Inode struct {
-	inodeCore InodeCore
-	// Device
-	device *Device
-
-	// S_IFDIR
-	directoryLocal   *DirectoryLocal
-	directoryExtents *DirectoryExtents
-
-	// S_IFREG
-	regularExtent *RegularExtent
-
-	// S_IFLNK
-	symlinkString *SymlinkString
-}
-
-type RegularExtent struct {
-	bmbtRecs []BmbtRec
-}
-
-type DirectoryExtents struct {
-	bmbtRecs []BmbtRec
-}
-
-type DirectoryLocal struct {
-	dir2SfHdr Dir2SfHdr
-	entries   []Dir2SfEntry
-}
-
-// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1787
-type BmbtRec struct {
-	L0 uint64
-	L1 uint64
-}
-
-// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L60
-func (b BmbtRec) Unpack() BmbtIrec {
-	return BmbtIrec{
-		StartOff:   (b.L0 & Mask64Lo(64-BMBT_EXNTFLAG_BITLEN)) >> 9,
-		StartBlock: ((b.L0 & Mask64Lo(9)) << 43) | (b.L1 >> 21),
-		BlockCount: (b.L1 & Mask64Lo(21)),
-	}
-}
-
-func Mask64Lo(n int) uint64 {
-	return (1 << n) - 1
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_types.h#L162
-type BmbtIrec struct {
-	StartOff   uint64
-	StartBlock uint64
-	BlockCount uint64
-	State      uint8
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
-type Dir2SfHdr struct {
-	Count   uint8
-	I8Count uint8
-	Parent  uint32
-}
-
-type Dir2Block struct {
-	Header  Dir3DataHdr
-	Entries []Dir2DataEntry
-
-	UnusedEntries []Dir2DataUnused
-	Leafs         []Dir2LeafEntry
-	Tail          Dir2BlockTail
-}
-
-type Dir2BlockTail struct {
-	Count uint32
-	Stale uint32
-}
-
-type Dir2LeafEntry struct {
-	Hashval uint32
-	Address uint32
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L320-L324
-type Dir3DataHdr struct {
-	Dir3BlkHdr
-	Frees   [XFS_DIR2_DATA_FD_COUNT]Dir2DataFree
-	Padding uint32
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L311-L318
-type Dir3BlkHdr struct {
-	Magic    uint32
-	CRC      uint32
-	BlockNo  uint64
-	Lsn      uint64
-	MetaUUID [16]byte
-	Owner    uint64
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L353-L358
-type Dir2DataUnused struct {
-	Freetag uint16
-	Length  uint16
-	/* variable offset */
-	Tag uint16
-}
-
-type Dir2DataFree struct {
-	Offset uint16
-	Length uint16
-}
-
-func (e Dir2SfEntry) FileType() uint8 {
-	return e.Filetype
-}
-func (e Dir2DataEntry) FileType() uint8 {
-	return e.Filetype
-}
-func (e Dir2SfEntry) Name() string {
-	return e.EntryName
-}
-func (e Dir2DataEntry) Name() string {
-	return e.EntryName
-}
-func (e Dir2SfEntry) InodeNumber() uint64 {
-	return uint64(e.Inumber)
-}
-func (e Dir2DataEntry) InodeNumber() uint64 {
-	return e.Inumber
-}
-
-var _ Entry = &Dir2DataEntry{}
-var _ Entry = &Dir2SfEntry{}
-
-type Entry interface {
-	Name() string
-	FileType() uint8
-	InodeNumber() uint64
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L339-L345
-type Dir2DataEntry struct {
-	Inumber   uint64
-	Namelen   uint8
-	EntryName string
-	Filetype  uint8
-	Tag       uint16
-}
-
-// https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L209-L220
-type Dir2SfEntry struct {
-	Namelen   uint8
-	Offset    [2]uint8
-	EntryName string
-	Filetype  uint8
-	Inumber   uint32
-}
-
-func (e Dir2SfEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name(), e.Filetype, e.Inumber)
-}
-
-func (e Dir2DataEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d tag: %x)", e.Name(), e.Filetype, e.Inumber, e.Tag)
-}
-
-type Device struct{}
-
-type SymlinkString struct {
-	Name string
-}
-
-type InodeCore struct {
-	Magic        [2]byte
-	Mode         uint16
-	Version      uint8
-	Format       uint8
-	OnLink       uint16
-	UID          uint32
-	GID          uint32
-	NLink        uint32
-	ProjId       uint16
-	Padding      [8]byte
-	Flushiter    uint16
-	Atime        uint64
-	Mtime        uint64
-	Ctime        uint64
-	Size         uint64
-	Nblocks      uint64
-	Extsize      uint32
-	Nextents     uint32
-	Anextents    uint16
-	Forkoff      uint8
-	Aformat      uint8
-	Dmevmask     uint32
-	Dmstate      uint16
-	Flags        uint16
-	Gen          uint32
-	NextUnlinked uint32
-
-	CRC         uint32
-	Changecount uint64
-	Lsn         uint64
-	Flags2      uint64
-	Cowextsize  uint32
-	Padding2    [12]byte
-	Crtime      uint64
-	Ino         uint64
-	MetaUUID    [16]byte
-}
-
 func (ic InodeCore) IsDir() bool {
 	return ic.Mode&0x4000 != 0
 }
@@ -629,8 +552,42 @@ func (ic InodeCore) isSupported() bool {
 	return false
 }
 
-type InobtRec struct {
-	Startino  uint32
-	Freecount uint32
-	Free      uint64
+// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L60
+func (b BmbtRec) Unpack() BmbtIrec {
+	return BmbtIrec{
+		StartOff:   (b.L0 & Mask64Lo(64-BMBT_EXNTFLAG_BITLEN)) >> 9,
+		StartBlock: ((b.L0 & Mask64Lo(9)) << 43) | (b.L1 >> 21),
+		BlockCount: (b.L1 & Mask64Lo(21)),
+	}
+}
+
+func Mask64Lo(n int) uint64 {
+	return (1 << n) - 1
+}
+
+func (e Dir2SfEntry) String() string {
+	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name(), e.Filetype, e.Inumber)
+}
+
+func (e Dir2DataEntry) String() string {
+	return fmt.Sprintf("%20s (type: %d, inode: %d tag: %x)", e.Name(), e.Filetype, e.Inumber, e.Tag)
+}
+
+func (e Dir2SfEntry) FileType() uint8 {
+	return e.Filetype
+}
+func (e Dir2DataEntry) FileType() uint8 {
+	return e.Filetype
+}
+func (e Dir2SfEntry) Name() string {
+	return e.EntryName
+}
+func (e Dir2DataEntry) Name() string {
+	return e.EntryName
+}
+func (e Dir2SfEntry) InodeNumber() uint64 {
+	return uint64(e.Inumber)
+}
+func (e Dir2DataEntry) InodeNumber() uint64 {
+	return e.Inumber
 }

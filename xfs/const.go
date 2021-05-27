@@ -1,5 +1,35 @@
 package xfs
 
 const (
-	BlockSize = 4096
+	BMBT_EXNTFLAG_BITLEN = 1
+	INODEV3_SIZE         = 176
+	INODE_SIZE           = 96
+
+	XFS_DIR2_DATA_FD_COUNT  = 3
+	XFS_DIR2_DATA_FREE_TAG  = 0xffff
+	XFS_DIR2_DATA_ALIGN_LOG = 3
+
+	LEAF_ENTRY_SIZE = 8
+
+	// Block Directory Magic number
+	XDB3 = 0x58444233
+
+	// Leaf Directory Magic number
+	XDD3 = 0x58444433
+)
+
+const (
+	XFS_DIR2_DATA_SPACE = iota
+	XFS_DIR2_LEAF_SPACE
+	XFS_DIR2_FREE_SPACE
+)
+
+const (
+	// typedef enum xfs_dinode_fmt
+	XFS_DINODE_FMT_DEV = iota
+	XFS_DINODE_FMT_LOCAL
+	XFS_DINODE_FMT_EXTENTS
+	XFS_DINODE_FMT_BTREE
+	XFS_DINODE_FMT_UUID
+	XFS_DINODE_FMT_RMAP
 )
