@@ -145,7 +145,8 @@ type Dir2SfEntry struct {
 	Offset    [2]uint8
 	EntryName string
 	Filetype  uint8
-	Inumber   uint32
+	Inumber   uint64
+	Inumber32 uint32
 }
 
 type Device struct{}
@@ -222,11 +223,13 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 			if err := binary.Read(r, binary.BigEndian, &inode.directoryLocal.dir2SfHdr); err != nil {
 				return nil, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL directory error: %w", err)
 			}
+
+			var isI8count bool
 			if inode.directoryLocal.dir2SfHdr.I8Count != 0 {
-				panic("header inode number 8 byte panic")
+				isI8count = true
 			}
 			for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
-				entry, err := parseEntry(r)
+				entry, err := parseEntry(r, isI8count)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -504,7 +507,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	return &block, nil
 }
 
-func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
+func parseEntry(r io.Reader, i8count bool) (*Dir2SfEntry, error) {
 	var entry Dir2SfEntry
 	if err := binary.Read(r, binary.BigEndian, &entry.Namelen); err != nil {
 		return nil, err
@@ -526,8 +529,15 @@ func parseEntry(r io.Reader) (*Dir2SfEntry, error) {
 		return nil, err
 	}
 
-	if err := binary.Read(r, binary.BigEndian, &entry.Inumber); err != nil {
-		return nil, err
+	if i8count {
+		if err := binary.Read(r, binary.BigEndian, &entry.Inumber); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := binary.Read(r, binary.BigEndian, &entry.Inumber32); err != nil {
+			return nil, err
+		}
+		entry.Inumber = uint64(entry.Inumber32)
 	}
 
 	return &entry, nil
