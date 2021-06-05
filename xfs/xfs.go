@@ -32,14 +32,6 @@ type FileSystem struct {
 	CurrentInode uint64
 }
 
-// File is implemented io/fs File interface
-type File struct {
-	fs *FileSystem
-	FileInfo
-
-	buffer *bytes.Buffer
-}
-
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	f, err := xfs.Open(name)
 	if err != nil {
@@ -52,20 +44,15 @@ func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	return f.Stat()
 }
 
-func (f *File) Stat() (fs.FileInfo, error) {
-	return &f.FileInfo, nil
-}
-
-func (f *File) Read(buf []byte) (int, error) {
-	return f.buffer.Read(buf)
-}
-
 func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 	var buf []byte
 	for _, rec := range inode.regularExtent.bmbtRecs {
 		p := rec.Unpack()
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
-		xfs.seekBlock(physicalBlockOffset)
+		_, err := xfs.seekBlock(physicalBlockOffset)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to seek block: %w", err)
+		}
 		b, err := xfs.readBlock(uint32(p.BlockCount))
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read block: %w", err)
@@ -75,19 +62,6 @@ func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 	}
 	return buf, nil
 }
-
-func (f *File) Close() error {
-	return nil
-}
-
-// dirEntry is implemented io/fs DirEntry interface
-type dirEntry struct {
-	FileInfo
-}
-
-func (d dirEntry) Type() fs.FileMode { return d.FileInfo.Mode().Type() }
-
-func (d dirEntry) Info() (fs.FileInfo, error) { return d.FileInfo, nil }
 
 func (xfs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 	const op = "read directory"
@@ -123,6 +97,7 @@ func (xfs *FileSystem) getRootInode() (*Inode, error) {
 }
 
 func (xfs *FileSystem) ReadFile(name string) ([]byte, error) {
+	// TODO: support ReadFile Interface
 	return []byte{}, nil
 }
 
@@ -151,7 +126,7 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		if !entry.IsDir() && entry.Name() == fileName {
 			if dir, ok := entry.(dirEntry); ok {
 				if dir.inode.regularExtent == nil {
-					return nil, xerrors.Errorf("regular extent empty", fs.ErrNotExist)
+					return nil, xerrors.Errorf("regular extent empty: %v", fs.ErrNotExist)
 				}
 
 				buf, err := xfs.newFile(dir.inode)
@@ -172,39 +147,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 
 func (xfs *FileSystem) Glob(pattern string) ([]string, error) {
 	return []string{}, nil
-}
-
-// FileInfo is implemented io/fs FileInfo interface
-type FileInfo struct {
-	name  string
-	inode *Inode
-
-	// mode use entry filetype, TODO: use inode.InodeCore.Mode
-	mode fs.FileMode
-}
-
-func (i FileInfo) IsDir() bool {
-	return i.inode.inodeCore.IsDir()
-}
-
-func (i FileInfo) ModTime() time.Time {
-	return time.Unix(int64(i.inode.inodeCore.Mtime), 0)
-}
-
-func (i FileInfo) Size() int64 {
-	return int64(i.inode.inodeCore.Size)
-}
-
-func (i FileInfo) Name() string {
-	return i.name
-}
-
-func (i FileInfo) Sys() interface{} {
-	return nil
-}
-
-func (i FileInfo) Mode() fs.FileMode {
-	return i.mode
 }
 
 func NewFileSystem(f *os.File) (*FileSystem, error) {
@@ -235,12 +177,12 @@ func NewFileSystem(f *os.File) (*FileSystem, error) {
 	return &fs, nil
 }
 
-func (xfs *FileSystem) seekInode(n uint64) {
-	xfs.file.Seek(int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n)), 0)
+func (xfs *FileSystem) seekInode(n uint64) (int64, error) {
+	return xfs.file.Seek(int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n)), 0)
 }
 
-func (xfs *FileSystem) seekBlock(n int64) {
-	xfs.file.Seek(n*int64(xfs.PrimaryAG.SuperBlock.BlockSize), 0)
+func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
+	return xfs.file.Seek(n*int64(xfs.PrimaryAG.SuperBlock.BlockSize), 0)
 }
 
 func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
@@ -312,11 +254,12 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse inode: %w", err)
 		}
+		// TODO: mode use inode.InodeCore.Mode
 		fileInfos = append(fileInfos,
 			FileInfo{
 				name:  entry.Name(),
 				inode: inode,
-				mode:  fileTypeToFileMode(entry.FileType()),
+				mode:  fs.FileMode(inode.inodeCore.Mode),
 			},
 		)
 	}
@@ -339,9 +282,8 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 			entries = append(entries, entry)
 		}
 	} else if inode.directoryExtents != nil {
-		// TODO: check
 		if len(inode.directoryExtents.bmbtRecs) == 0 {
-			panic("directory extents tree bmbtRecs is empty error")
+			return nil, xerrors.New("directory extents tree bmbtRecs is empty error")
 		}
 
 		for _, b := range inode.directoryExtents.bmbtRecs {
@@ -365,7 +307,68 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 	return entries, nil
 }
 
-// old methods
+// FileInfo is implemented io/fs FileInfo interface
+type FileInfo struct {
+	name  string
+	inode *Inode
+
+	mode fs.FileMode
+}
+
+func (i FileInfo) IsDir() bool {
+	return i.inode.inodeCore.IsDir()
+}
+
+func (i FileInfo) ModTime() time.Time {
+	return time.Unix(int64(i.inode.inodeCore.Mtime), 0)
+}
+
+func (i FileInfo) Size() int64 {
+	return int64(i.inode.inodeCore.Size)
+}
+
+func (i FileInfo) Name() string {
+	return i.name
+}
+
+func (i FileInfo) Sys() interface{} {
+	return nil
+}
+
+func (i FileInfo) Mode() fs.FileMode {
+	return i.mode
+}
+
+// dirEntry is implemented io/fs DirEntry interface
+type dirEntry struct {
+	FileInfo
+}
+
+func (d dirEntry) Type() fs.FileMode { return d.FileInfo.Mode().Type() }
+
+func (d dirEntry) Info() (fs.FileInfo, error) { return d.FileInfo, nil }
+
+// File is implemented io/fs File interface
+type File struct {
+	fs *FileSystem
+	FileInfo
+
+	buffer *bytes.Buffer
+}
+
+func (f *File) Stat() (fs.FileInfo, error) {
+	return &f.FileInfo, nil
+}
+
+func (f *File) Read(buf []byte) (int, error) {
+	return f.buffer.Read(buf)
+}
+
+func (f *File) Close() error {
+	return nil
+}
+
+// listEntry use in commands this is old methods.
 func (xfs *FileSystem) listEntry(ino uint64) (map[string]uint64, error) {
 	inode, err := xfs.ParseInode(ino)
 	if err != nil {
@@ -384,35 +387,4 @@ func (xfs *FileSystem) listEntry(ino uint64) (map[string]uint64, error) {
 		nameInodeMap[entry.Name()] = uint64(entry.InodeNumber())
 	}
 	return nameInodeMap, nil
-}
-
-func fileTypeToFileMode(n uint8) fs.FileMode {
-	/*
-	   Filetypes:
-	       1   Regular file
-	       2   Directory
-	       3   Character special device
-	       4   Block special device
-	       5   FIFO
-	       6   Socket
-	       7   Symlink
-	*/
-	switch n {
-	case 1:
-		return 0
-	case 2:
-		return fs.ModeDir
-	case 3:
-		return fs.ModeCharDevice
-	case 4:
-		return fs.ModeDevice
-	case 5:
-		return fs.ModeNamedPipe
-	case 6:
-		return fs.ModeSocket
-	case 7:
-		return fs.ModeSymlink
-	default:
-		return fs.ModeIrregular
-	}
 }
