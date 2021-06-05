@@ -4,15 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"log"
 
 	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 
 	"golang.org/x/xerrors"
-)
-
-const (
-	BlockSize = 4096
 )
 
 type AG struct {
@@ -116,66 +111,84 @@ type BtreeShortBlock struct {
 }
 
 func ParseAG(reader io.Reader) (*AG, error) {
-	// TODO: Fix AGF, AGI spec
-	r := io.LimitReader(reader, int64(BlockSize*9))
-	buf := utils.ReadBlock(r)
-	fr := bytes.NewReader(buf)
+	r := io.LimitReader(reader, int64(utils.BlockSize*5))
 
-	rf := func(r io.Reader) io.Reader {
-		return bytes.NewReader(utils.ReadSector(r))
-	}
 	var ag AG
-	if err := binary.Read(rf(fr), binary.BigEndian, &ag.SuperBlock); err != nil {
+	buf, err := utils.ReadSector(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create superblock reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.SuperBlock); err != nil {
 		return nil, xerrors.Errorf("failed to read superblock: %w", err)
 	}
 
-	if err := binary.Read(rf(fr), binary.BigEndian, &ag.Agf); err != nil {
+	buf, err = utils.ReadSector(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create afg reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agf); err != nil {
 		return nil, xerrors.Errorf("failed to read afg: %w", err)
 	}
 
-	if err := binary.Read(rf(fr), binary.BigEndian, &ag.Agi); err != nil {
+	buf, err = utils.ReadSector(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create agi reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agi); err != nil {
 		return nil, xerrors.Errorf("failed to read agi: %w", err)
 	}
 
-	if err := binary.Read(rf(fr), binary.BigEndian, &ag.Agfl); err != nil {
+	buf, err = utils.ReadSector(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create agfl reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agfl); err != nil {
 		return nil, xerrors.Errorf("failed to read agfl: %w", err)
 	}
 
 	// parse AB3B
-	sblockReader := bytes.NewReader(utils.ReadBlock(r))
-	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Ab3b); err != nil {
-		log.Fatalf("binary read error: %+v", err)
+	buf, err = utils.ReadBlock(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create AB3B reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Ab3b); err != nil {
+		return nil, xerrors.Errorf("failed to read ab3b: %w", err)
 	}
 
 	// parse AB3C
-	sblockReader = bytes.NewReader(utils.ReadBlock(r))
-	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Ab3c); err != nil {
-		log.Fatalf("binary read error: %+v", err)
+	buf, err = utils.ReadBlock(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create AB3C reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Ab3c); err != nil {
+		return nil, xerrors.Errorf("failed to read AB3C: %w", err)
 	}
 
 	// parse IAB3
-	sblockReader = bytes.NewReader(utils.ReadBlock(r))
-	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Iab3.Header); err != nil {
-		log.Fatalf("binary read error: %+v", err)
+	buf, err = utils.ReadBlock(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create IAB3 reader: %w", err)
+	}
+	iab3Reader := bytes.NewReader(buf)
+	if err := binary.Read(iab3Reader, binary.BigEndian, &ag.Iab3.Header); err != nil {
+		return nil, xerrors.Errorf("failed to read IAB3: %w", err)
 	}
 	for i := 0; i < int(ag.Iab3.Header.Numrecs); i++ {
 		var inode InobtRec
-		if err := binary.Read(sblockReader, binary.BigEndian, &inode); err != nil {
-			log.Fatalf("binary read error: %+v", err)
+		if err := binary.Read(iab3Reader, binary.BigEndian, &inode); err != nil {
+			return nil, xerrors.Errorf("failed to read inode list: %w", err)
 		}
 		ag.Iab3.Inodes = append(ag.Iab3.Inodes, inode)
 	}
 
 	// parse FIB3
-	sblockReader = bytes.NewReader(utils.ReadBlock(r))
-	if err := binary.Read(sblockReader, binary.BigEndian, &ag.Fib3); err != nil {
-		log.Fatalf("binary read error: %+v", err)
+	buf, err = utils.ReadBlock(r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create FIB3 reader: %w", err)
 	}
-
-	// parse Freeblock
-	utils.ReadBlock(r)
-	utils.ReadBlock(r)
-	utils.ReadBlock(r)
-	utils.ReadBlock(r)
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Fib3); err != nil {
+		return nil, xerrors.Errorf("failed to read FIB3: %w", err)
+	}
+	// TODO: parse Free block, 4 block
 	return &ag, nil
 }

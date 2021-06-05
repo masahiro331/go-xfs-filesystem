@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"unsafe"
 
 	"golang.org/x/xerrors"
@@ -237,7 +236,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 			for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
 				entry, err := parseEntry(r, isI8count)
 				if err != nil {
-					log.Fatal(err)
+					return nil, xerrors.Errorf("failed to parse %d-th entry: %w", i, err)
 				}
 				inode.directoryLocal.entries = append(inode.directoryLocal.entries, *entry)
 			}
@@ -354,6 +353,7 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 	for {
 		entry := Dir2DataEntry{}
 
+		// Parse Inode number
 		ino := make([]byte, unsafe.Sizeof(entry.Inumber))
 		_, err := r.Read(ino)
 		if err != nil {
@@ -362,10 +362,11 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 			}
 			return nil, xerrors.Errorf("failed to read inumber: %w", err)
 		}
-
 		if err := binary.Read(bytes.NewReader(ino), binary.BigEndian, &entry.Inumber); err != nil {
 			return nil, xerrors.Errorf("failed to read inumber binary: %w", err)
 		}
+
+		// Skip FreeTag
 		if (entry.Inumber >> 48) == XFS_DIR2_DATA_FREE_TAG {
 			freeLen := (entry.Inumber >> 32) & Mask64Lo(16)
 			if freeLen != 8 {
@@ -375,12 +376,14 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 					return nil, xerrors.Errorf("failed to read unused padding: %w", err)
 				}
 			}
-
 			continue
 		}
+
+		// Parse Name length
 		if err := binary.Read(r, binary.BigEndian, &entry.Namelen); err != nil {
 			return nil, xerrors.Errorf("failed to read name length: %w", err)
 		}
+		// Parse Name
 		nameBuf := make([]byte, entry.Namelen)
 		n, err := r.Read(nameBuf)
 		if err != nil {
@@ -391,12 +394,12 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 		}
 		entry.EntryName = string(nameBuf)
 
+		// Parse FileType
 		if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
 			return nil, xerrors.Errorf("failed to read file type: %w", err)
 		}
 
-		// 12 = Inumber + Namelen + Filetype + Tag
-		// 8  = Alignment
+		// Read Alignment, Dir2DataEntry is 8byte alignment
 		align := (int(unsafe.Sizeof(entry.Inumber)) +
 			int(unsafe.Sizeof(entry.Namelen)) +
 			int(unsafe.Sizeof(entry.Filetype)) +
@@ -411,6 +414,7 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 			}
 		}
 
+		// Read Tag
 		if err := binary.Read(r, binary.BigEndian, &entry.Tag); err != nil {
 			return nil, xerrors.Errorf("failed to read tag: %w", err)
 		}

@@ -3,27 +3,39 @@ package utils
 import (
 	"fmt"
 	"io"
+
+	"golang.org/x/xerrors"
 )
 
-var blockCount int64
+const (
+	BlockSize  = 4096
+	SectorSize = 512
+)
 
-func ReadBlock(r io.Reader) []byte {
-	buf := make([]byte, 4096)
-	_, err := r.Read(buf)
+func ReadBlock(r io.Reader) ([]byte, error) {
+	buf := make([]byte, BlockSize)
+	i, err := r.Read(buf)
 	if err != nil {
-		panic(fmt.Sprintf("Read error %+v", err))
+		return nil, xerrors.Errorf("failed to read: %w", err)
 	}
-	// ------- debug ----------
-	// blockCount++
-	// fmt.Printf("read block: %d\n", blockCount)
-	// ------------------------
-	return buf
+	if i != BlockSize {
+		return nil, xerrors.Errorf("block size error, read %d byte", i)
+	}
+
+	return buf, nil
 }
 
-func ReadSector(r io.Reader) []byte {
-	buf := make([]byte, 512)
-	r.Read(buf)
-	return buf
+func ReadSector(r io.Reader) ([]byte, error) {
+	buf := make([]byte, SectorSize)
+	i, err := r.Read(buf)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read: %w", err)
+	}
+	if i != SectorSize {
+		return nil, xerrors.Errorf("sector size error, read %d byte", i)
+	}
+
+	return buf, nil
 }
 
 func DebugBlock(buf []byte) {

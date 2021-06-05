@@ -74,7 +74,9 @@ func (fs *FileSystem) Debug(commands ...string) {
 		panic("debug arguments error: " + commands[1])
 	}
 	fs.seekBlock(int64(offset))
-	utils.DebugBlock(utils.ReadBlock(fs.file))
+	buf, _ := utils.ReadBlock(fs.file)
+
+	utils.DebugBlock(buf)
 }
 
 func (fs *FileSystem) ChangeInode(commands ...string) (string, error) {
