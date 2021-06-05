@@ -2,7 +2,6 @@ package xfs
 
 import (
 	"bytes"
-	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -350,12 +349,6 @@ type dirEntry struct {
 }
 
 func (d dirEntry) Type() fs.FileMode {
-	fmt.Println("=================")
-	fmt.Println(d.FileInfo.Mode().Type())
-	fmt.Println(d.FileInfo.Mode().Perm())
-	fmt.Println(fs.ModeType)
-
-	fmt.Println("=================")
 	return d.FileInfo.Mode().Type()
 }
 
