@@ -10,6 +10,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/xerrors"
+
+	"github.com/masahiro331/go-xfs-filesystem/log"
 )
 
 var (
@@ -249,7 +251,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 			}
 			inode.symlinkString.Name = string(buf)
 		} else {
-			panic("not support XFS_DINODE_FMT_LOCAL")
+			log.Logger.Warn("not support XFS_DINODE_FMT_LOCAL")
 		}
 	case XFS_DINODE_FMT_EXTENTS:
 		if inode.inodeCore.IsDir() {
@@ -271,18 +273,18 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 				inode.regularExtent.bmbtRecs = append(inode.regularExtent.bmbtRecs, bmbtRec)
 			}
 		} else if inode.inodeCore.IsSymlink() {
-			panic("not support XFS_DINODE_FMT_EXTENTS isSymlink")
+			log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS isSymlink")
 		} else {
-			panic("not support XFS_DINODE_FMT_EXTENTS")
+			log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS")
 		}
 	case XFS_DINODE_FMT_BTREE:
-		panic("not support XFS_DINODE_FMT_BTREE")
+		log.Logger.Warn("not support XFS_DINODE_FMT_BTREE")
 	case XFS_DINODE_FMT_UUID:
-		panic("not support XFS_DINODE_FMT_UUID")
+		log.Logger.Warn("not support XFS_DINODE_FMT_UUID")
 	case XFS_DINODE_FMT_RMAP:
-		panic("not support XFS_DINODE_FMT_RMAP")
+		log.Logger.Warn("not support XFS_DINODE_FMT_RMAP")
 	default:
-		panic("not support")
+		log.Logger.Warn("not support")
 	}
 
 	// TODO: support extend attribute fork , see. Chapter 19 Extended Attributes
@@ -342,6 +344,15 @@ func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
 	reader := bytes.NewReader(buf[:uint32(len(buf))-((tail.Count*LEAF_ENTRY_SIZE)+uint32(unsafe.Sizeof(tail)))])
 
 	dir2DataEntries, err := xfs.parseDir2DataEntry(reader)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse dir2 Data Entry: %w", err)
+	}
+	return dir2DataEntries, nil
+}
+
+// Parse XDD3block, XDD3 block is multi block architecture
+func (xfs *FileSystem) parseXDD3Block(r io.Reader) ([]Dir2DataEntry, error) {
+	dir2DataEntries, err := xfs.parseDir2DataEntry(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse dir2 Data Entry: %w", err)
 	}
@@ -420,15 +431,6 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 		}
 		entries = append(entries, entry)
 	}
-}
-
-// Parse XDD3block, XDD3 block is multi block architecture
-func (xfs *FileSystem) parseXDD3Block(r io.Reader) ([]Dir2DataEntry, error) {
-	dir2DataEntries, err := xfs.parseDir2DataEntry(r)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to parse dir2 Data Entry: %w", err)
-	}
-	return dir2DataEntries, nil
 }
 
 func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
