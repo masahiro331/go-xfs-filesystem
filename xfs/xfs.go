@@ -30,9 +30,6 @@ type FileSystem struct {
 	file      *os.File
 	PrimaryAG AG
 	AGs       []AG
-
-	// DEBUG
-	CurrentInode uint64
 }
 
 func (xfs *FileSystem) Close() error {
@@ -164,10 +161,9 @@ func NewFileSystem(f *os.File) (*FileSystem, error) {
 	}
 
 	fs := FileSystem{
-		file:         f,
-		PrimaryAG:    *primaryAG,
-		AGs:          []AG{*primaryAG},
-		CurrentInode: primaryAG.SuperBlock.Rootino,
+		file:      f,
+		PrimaryAG: *primaryAG,
+		AGs:       []AG{*primaryAG},
 	}
 
 	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
