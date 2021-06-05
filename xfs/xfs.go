@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/xerrors"
+
+	"github.com/masahiro331/go-xfs-filesystem/log"
 )
 
 var (
@@ -30,6 +32,10 @@ type FileSystem struct {
 
 	// DEBUG
 	CurrentInode uint64
+}
+
+func (xfs *FileSystem) Close() error {
+	return xfs.file.Close()
 }
 
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
@@ -96,9 +102,14 @@ func (xfs *FileSystem) getRootInode() (*Inode, error) {
 	return inode, nil
 }
 
+// TODO: support ReadFile Interface
 func (xfs *FileSystem) ReadFile(name string) ([]byte, error) {
-	// TODO: support ReadFile Interface
 	return []byte{}, nil
+}
+
+// TODO: support GlobFS Interface
+func (xfs *FileSystem) Glob(pattern string) ([]string, error) {
+	return []string{}, nil
 }
 
 func (xfs *FileSystem) wrapError(op, path string, err error) error {
@@ -143,10 +154,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		}
 	}
 	return nil, fs.ErrNotExist
-}
-
-func (xfs *FileSystem) Glob(pattern string) ([]string, error) {
-	return []string{}, nil
 }
 
 func NewFileSystem(f *os.File) (*FileSystem, error) {
@@ -293,6 +300,7 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 				if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
 					return nil, xerrors.Errorf("failed to parse dir2 block: %w", err)
 				}
+				log.Logger.Warn(err)
 			}
 			if block == nil {
 				break

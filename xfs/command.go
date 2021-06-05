@@ -163,12 +163,10 @@ func (xfs *FileSystem) ListSegments(commands ...string) (string, error) {
 
 func (fs *FileSystem) Tree(commands ...string) (string, error) {
 	panic("not support")
-	return "", nil
 }
 
 func (fs *FileSystem) Catenate(commands ...string) (string, error) {
 	panic("not support")
-	return "", nil
 }
 
 func (xfs *FileSystem) Print(commands ...string) (string, error) {
@@ -205,4 +203,35 @@ func (xfs *FileSystem) Print(commands ...string) (string, error) {
 	}
 
 	return string(fileBuffer[:inode.inodeCore.Size]), nil
+}
+
+func (i *Inode) String() string {
+	var s string
+	s = fmt.Sprintf("%+v\n", i.inodeCore)
+
+	if i.directoryLocal != nil {
+		s = s + fmt.Sprintf("%+v\n", i.directoryLocal)
+	}
+	if i.directoryExtents != nil {
+		s = s + fmt.Sprintf("%+v\n", i.directoryExtents)
+		for i, b := range i.directoryExtents.bmbtRecs {
+			s = s + fmt.Sprintf("%d: %+v\n", i, b.Unpack())
+		}
+	}
+	if i.regularExtent != nil {
+		s = s + fmt.Sprintf("%+v\n", i.regularExtent)
+		for i, b := range i.regularExtent.bmbtRecs {
+			s = s + fmt.Sprintf("%d: %+v\n", i, b.Unpack())
+		}
+	}
+
+	if i.symlinkString != nil {
+		s = s + fmt.Sprintf("%+v\n", i.symlinkString)
+	}
+
+	if i.device != nil {
+		s = s + "DEVICE\n"
+	}
+
+	return s
 }

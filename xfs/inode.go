@@ -3,7 +3,6 @@ package xfs
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -299,37 +298,6 @@ func (i *Inode) AttributeOffset() uint32 {
 	return uint32(i.inodeCore.Forkoff)*8 + INODEV3_SIZE
 }
 
-func (i *Inode) String() string {
-	var s string
-	s = fmt.Sprintf("%+v\n", i.inodeCore)
-
-	if i.directoryLocal != nil {
-		s = s + fmt.Sprintf("%+v\n", i.directoryLocal)
-	}
-	if i.directoryExtents != nil {
-		s = s + fmt.Sprintf("%+v\n", i.directoryExtents)
-		for i, b := range i.directoryExtents.bmbtRecs {
-			s = s + fmt.Sprintf("%d: %+v\n", i, b.Unpack())
-		}
-	}
-	if i.regularExtent != nil {
-		s = s + fmt.Sprintf("%+v\n", i.regularExtent)
-		for i, b := range i.regularExtent.bmbtRecs {
-			s = s + fmt.Sprintf("%d: %+v\n", i, b.Unpack())
-		}
-	}
-
-	if i.symlinkString != nil {
-		s = s + fmt.Sprintf("%+v\n", i.symlinkString)
-	}
-
-	if i.device != nil {
-		s = s + "DEVICE\n"
-	}
-
-	return s
-}
-
 // Parse XDB3block, XDB3 block is single block architecture
 func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
 	buf, err := ioutil.ReadAll(r)
@@ -483,7 +451,7 @@ func parseEntry(r io.Reader, i8count bool) (*Dir2SfEntry, error) {
 		return nil, err
 	}
 	if i != int(entry.Namelen) {
-		return nil, errors.New("")
+		return nil, xerrors.Errorf("read name error: %s", string(buf))
 	}
 	entry.EntryName = string(buf)
 	if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
