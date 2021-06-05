@@ -403,8 +403,8 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 
 func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	block := Dir2Block{}
-	if bmbtIrec.StartBlock >= uint64(XFS_DIR2_LEAF_OFFSET) {
-		// Skip Leaf and Free node
+	// Skip Leaf and Free node
+	if int64(bmbtIrec.StartOff)*int64(xfs.PrimaryAG.SuperBlock.BlockSize) >= int64(XFS_DIR2_LEAF_OFFSET) {
 		return &block, nil
 	}
 
@@ -413,6 +413,8 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	if err != nil {
 		return nil, xerrors.Errorf("failed to seek block: %w", err)
 	}
+
+	// TODO: add tests, If Block count greater than 2
 	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.BlockSize*uint32(bmbtIrec.BlockCount)))
 	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
 		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
