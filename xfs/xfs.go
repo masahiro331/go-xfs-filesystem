@@ -380,24 +380,3 @@ func (f *File) Read(buf []byte) (int, error) {
 func (f *File) Close() error {
 	return nil
 }
-
-// listEntry use in commands this is old methods.
-func (xfs *FileSystem) listEntry(ino uint64) (map[string]uint64, error) {
-	inode, err := xfs.ParseInode(ino)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to parse inode: %w", err)
-	}
-	if !inode.inodeCore.IsDir() {
-		return nil, xerrors.New("error inode is not directory")
-	}
-
-	if inode.directoryLocal == nil {
-		return nil, xerrors.Errorf("error inode directory local is null: %+v", inode)
-	}
-
-	nameInodeMap := map[string]uint64{}
-	for _, entry := range inode.directoryLocal.entries {
-		nameInodeMap[entry.Name()] = uint64(entry.InodeNumber())
-	}
-	return nameInodeMap, nil
-}
