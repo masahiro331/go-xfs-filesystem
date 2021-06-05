@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -66,7 +67,7 @@ func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 
 		buf = append(buf, b...)
 	}
-	return buf, nil
+	return buf[:inode.inodeCore.Size], nil
 }
 
 func (xfs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
@@ -352,7 +353,15 @@ type dirEntry struct {
 	FileInfo
 }
 
-func (d dirEntry) Type() fs.FileMode { return d.FileInfo.Mode().Type() }
+func (d dirEntry) Type() fs.FileMode {
+	fmt.Println("=================")
+	fmt.Println(d.FileInfo.Mode().Type())
+	fmt.Println(d.FileInfo.Mode().Perm())
+	fmt.Println(fs.ModeType)
+
+	fmt.Println("=================")
+	return d.FileInfo.Mode().Type()
+}
 
 func (d dirEntry) Info() (fs.FileInfo, error) { return d.FileInfo, nil }
 
