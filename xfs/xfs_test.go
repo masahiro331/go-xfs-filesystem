@@ -108,6 +108,23 @@ func TestFileSystemCheckWalkDir(t *testing.T) {
 				"parent/child/child/child/child/executable",
 			},
 		},
+		{
+			filesystem: "testdata/image.xfs",
+			name:       "search executable file with root node",
+			parentPath: "/",
+			expectedFiles: []string{
+				"/parent/child/child/child/child/child/executable",
+				"/parent/child/child/child/child/executable",
+			},
+		},
+		{
+			filesystem: "testdata/image.xfs",
+			name:       "search executable file with deep path",
+			parentPath: "/parent/child/child/child/child/child/",
+			expectedFiles: []string{
+				"/parent/child/child/child/child/child/executable",
+			},
+		},
 	}
 
 	for _, tt := range testExecutableFileCases {

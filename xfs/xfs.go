@@ -77,6 +77,19 @@ func (xfs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
+	if name == "/" {
+		inode, err := xfs.getRootInode()
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse root inode: %w", err)
+		}
+		return FileInfo{
+			name:  "/",
+			inode: inode,
+			mode:  fs.FileMode(inode.inodeCore.Mode),
+		}, nil
+	}
+	name = strings.TrimRight(name, string(filepath.Separator))
+
 	dirs, dir := path.Split(name)
 	dirEntries, err := xfs.readDirEntry(dirs)
 	if err != nil {
