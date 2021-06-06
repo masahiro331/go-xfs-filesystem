@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"fmt"
 	"io"
 
 	"golang.org/x/xerrors"
@@ -36,35 +35,4 @@ func ReadSector(r io.Reader) ([]byte, error) {
 	}
 
 	return buf, nil
-}
-
-func DebugBlock(buf []byte) {
-	lineByteSize := 16
-
-	for y := 0; y < len(buf)/lineByteSize; y++ {
-		str := lineStr(buf[lineByteSize*y : lineByteSize*(y+1)])
-		fmt.Println(string(str))
-	}
-}
-
-func lineStr(buf []byte) []rune {
-	var binaryStr string
-	for i, b := range buf {
-		if i%2 == 0 {
-			binaryStr = binaryStr + " "
-		}
-		binaryStr = binaryStr + fmt.Sprintf("%02x", b)
-	}
-	return []rune(fmt.Sprintf("%s  %s", binaryStr, formatBinaryString(buf)))
-}
-
-func formatBinaryString(buf []byte) (str string) {
-	for _, b := range buf {
-		if b > 0x20 && b < 0x7f {
-			str = str + string(b)
-		} else {
-			str = str + "."
-		}
-	}
-	return
 }

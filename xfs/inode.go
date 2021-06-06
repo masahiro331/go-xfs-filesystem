@@ -3,7 +3,6 @@ package xfs
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"unsafe"
@@ -505,14 +504,6 @@ func (b BmbtRec) Unpack() BmbtIrec {
 
 func Mask64Lo(n int) uint64 {
 	return (1 << n) - 1
-}
-
-func (e Dir2SfEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d)", e.Name(), e.Filetype, e.Inumber)
-}
-
-func (e Dir2DataEntry) String() string {
-	return fmt.Sprintf("%20s (type: %d, inode: %d tag: %x)", e.Name(), e.Filetype, e.Inumber, e.Tag)
 }
 
 func (e Dir2SfEntry) FileType() uint8 {
