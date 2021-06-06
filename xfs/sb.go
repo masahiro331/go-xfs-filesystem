@@ -1,7 +1,7 @@
 package xfs
 
 type SuperBlock struct {
-	Magicnum   [4]byte
+	Magicnum   uint32
 	BlockSize  uint32
 	Dblocks    uint64   // rfsblock
 	Rblocks    uint64   // rfsblock

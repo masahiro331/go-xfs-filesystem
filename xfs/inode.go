@@ -158,7 +158,7 @@ type SymlinkString struct {
 }
 
 type InodeCore struct {
-	Magic        [2]byte
+	Magic        uint16
 	Mode         uint16
 	Version      uint8
 	Format       uint8
@@ -214,6 +214,10 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 
 	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore); err != nil {
 		return nil, xerrors.Errorf("failed to read InodeCore: %w", err)
+	}
+
+	if inode.inodeCore.Magic != XFS_DINODE_MAGIC {
+		return nil, xerrors.Errorf("invalid magic byte error")
 	}
 
 	if !inode.inodeCore.isSupported() {
@@ -421,12 +425,12 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	}
 
 	switch block.Header.Magic {
-	case XDD3:
+	case XFS_DIR3_DATA_MAGIC:
 		block.Entries, err = xfs.parseXDD3Block(r)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse XDD3 block: %w", err)
 		}
-	case XDB3:
+	case XFS_DIR3_BLOCK_MAGIC:
 		block.Entries, err = xfs.parseXDB3Block(r)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse XDB3 block: %w", err)

@@ -32,7 +32,7 @@ type AGFL struct {
 }
 
 type AGF struct {
-	Magicnum   [4]byte
+	Magicnum   uint32
 	Versionnum uint32
 	Seqno      uint32
 	Length     uint32
@@ -111,7 +111,7 @@ type BtreeShortBlock struct {
 }
 
 func ParseAG(reader io.Reader) (*AG, error) {
-	r := io.LimitReader(reader, int64(utils.BlockSize*5))
+	r := io.LimitReader(reader, int64(utils.BlockSize))
 
 	var ag AG
 	buf, err := utils.ReadSector(r)
@@ -121,6 +121,9 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.SuperBlock); err != nil {
 		return nil, xerrors.Errorf("failed to read superblock: %w", err)
 	}
+	if ag.SuperBlock.Magicnum != XFS_SB_MAGIC {
+		return nil, xerrors.Errorf("failed to parse superblock magic byte error: %08x", ag.SuperBlock.Magicnum)
+	}
 
 	buf, err = utils.ReadSector(r)
 	if err != nil {
@@ -128,6 +131,9 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	}
 	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agf); err != nil {
 		return nil, xerrors.Errorf("failed to read afg: %w", err)
+	}
+	if ag.Agf.Magicnum != XFS_AGF_MAGIC {
+		return nil, xerrors.Errorf("failed to parse agf magic byte error: %08x", ag.Agf.Magicnum)
 	}
 
 	buf, err = utils.ReadSector(r)
@@ -137,6 +143,9 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agi); err != nil {
 		return nil, xerrors.Errorf("failed to read agi: %w", err)
 	}
+	if ag.Agi.Magicnum != XFS_AGI_MAGIC {
+		return nil, xerrors.Errorf("failed to parse agi magic byte error: %08x", ag.Agi.Magicnum)
+	}
 
 	buf, err = utils.ReadSector(r)
 	if err != nil {
@@ -145,7 +154,11 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agfl); err != nil {
 		return nil, xerrors.Errorf("failed to read agfl: %w", err)
 	}
+	if ag.Agfl.Magicnum != XFS_AGFL_MAGIC {
+		return nil, xerrors.Errorf("failed to parse agfl magic byte error: %08x", ag.Agfl.Magicnum)
+	}
 
+	/**
 	// parse AB3B
 	buf, err = utils.ReadBlock(r)
 	if err != nil {
@@ -154,6 +167,9 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Ab3b); err != nil {
 		return nil, xerrors.Errorf("failed to read ab3b: %w", err)
 	}
+	// if ag.Ab3b.Magicnum != XFS_ABTB_CRC_MAGIC {
+	// 	return nil, xerrors.Errorf("failed to parse ab3b magic byte error: %08x", ag.Ab3b.Magicnum)
+	// }
 
 	// parse AB3C
 	buf, err = utils.ReadBlock(r)
@@ -163,6 +179,9 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Ab3c); err != nil {
 		return nil, xerrors.Errorf("failed to read AB3C: %w", err)
 	}
+	// if ag.Ab3c.Magicnum != XFS_ABTC_CRC_MAGIC {
+	// 	return nil, xerrors.Errorf("failed to parse ab3b magic byte error: %08x", ag.Ab3b.Magicnum)
+	// }
 
 	// parse IAB3
 	buf, err = utils.ReadBlock(r)
@@ -173,6 +192,10 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	if err := binary.Read(iab3Reader, binary.BigEndian, &ag.Iab3.Header); err != nil {
 		return nil, xerrors.Errorf("failed to read IAB3: %w", err)
 	}
+	// if ag.Iab3.Header.Magicnum != XFS_IBT_CRC_MAGIC {
+	// 	return nil, xerrors.Errorf("failed to parse iab3 magic byte error: %08x", ag.Iab3.Header.Magicnum)
+	// }
+
 	for i := 0; i < int(ag.Iab3.Header.Numrecs); i++ {
 		var inode InobtRec
 		if err := binary.Read(iab3Reader, binary.BigEndian, &inode); err != nil {
@@ -190,5 +213,6 @@ func ParseAG(reader io.Reader) (*AG, error) {
 		return nil, xerrors.Errorf("failed to read FIB3: %w", err)
 	}
 	// TODO: parse Free block, 4 block
+	*/
 	return &ag, nil
 }
