@@ -509,18 +509,23 @@ func Mask64Lo(n int) uint64 {
 func (e Dir2SfEntry) FileType() uint8 {
 	return e.Filetype
 }
+
 func (e Dir2DataEntry) FileType() uint8 {
 	return e.Filetype
 }
+
 func (e Dir2SfEntry) Name() string {
 	return e.EntryName
 }
+
 func (e Dir2DataEntry) Name() string {
 	return e.EntryName
 }
+
 func (e Dir2SfEntry) InodeNumber() uint64 {
 	return uint64(e.Inumber)
 }
+
 func (e Dir2DataEntry) InodeNumber() uint64 {
 	return e.Inumber
 }

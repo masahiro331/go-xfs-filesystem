@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
+	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -164,6 +166,21 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		}
 	}
 	return nil, fs.ErrNotExist
+}
+
+func IsValid(r io.Reader) (reader io.Reader, ok bool, err error) {
+	buf := make([]byte, utils.BlockSize)
+	n, err := r.Read(buf)
+	if err != nil {
+		return nil, false, xerrors.Errorf("failed to read block: %w", err)
+	}
+
+	_, err = ParseAG(bytes.NewReader(buf[:n]))
+	if err != nil {
+		return io.MultiReader(bytes.NewReader(buf[:n]), reader), false, nil
+	}
+
+	return io.MultiReader(bytes.NewReader(buf[:n]), reader), true, nil
 }
 
 func NewFileSystem(f *os.File) (*FileSystem, error) {
