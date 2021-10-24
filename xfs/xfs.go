@@ -24,6 +24,8 @@ var (
 	_ fs.File     = &File{}
 	_ fs.FileInfo = &FileInfo{}
 	_ fs.DirEntry = dirEntry{}
+
+	ErrOpenSymlink = xerrors.New("symlink open not support")
 )
 
 // FileSystem is implemented io/fs FS interface
@@ -148,6 +150,10 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	for _, entry := range dirEntries {
 		if !entry.IsDir() && entry.Name() == fileName {
 			if dir, ok := entry.(dirEntry); ok {
+				if dir.Type().Perm()&0xA000 == 0 {
+					return nil, ErrOpenSymlink
+				}
+
 				if dir.inode.regularExtent == nil {
 					return nil, xerrors.Errorf("regular extent empty: %v", fs.ErrNotExist)
 				}
