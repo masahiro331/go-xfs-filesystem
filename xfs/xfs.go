@@ -168,7 +168,7 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	return nil, fs.ErrNotExist
 }
 
-func IsValid(r io.Reader) (reader io.Reader, ok bool, err error) {
+func IsValid(r io.Reader) (io.Reader, bool, error) {
 	buf := make([]byte, utils.BlockSize)
 	n, err := r.Read(buf)
 	if err != nil {
@@ -177,10 +177,10 @@ func IsValid(r io.Reader) (reader io.Reader, ok bool, err error) {
 
 	_, err = ParseAG(bytes.NewReader(buf[:n]))
 	if err != nil {
-		return io.MultiReader(bytes.NewReader(buf[:n]), reader), false, nil
+		return io.MultiReader(bytes.NewReader(buf[:n]), r), false, nil
 	}
 
-	return io.MultiReader(bytes.NewReader(buf[:n]), reader), true, nil
+	return io.MultiReader(bytes.NewReader(buf[:n]), r), true, nil
 }
 
 func NewFileSystem(f *os.File) (*FileSystem, error) {
@@ -236,7 +236,7 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 
 	fileInfos, err := xfs.listFileInfo(inode.inodeCore.Ino)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to list directory entries inode: %d: %w", inode.inodeCore.Ino, err)
+		return nil, xerrors.Errorf("failed to list root inode directory entries: %w", err)
 	}
 
 	currentInode := inode
@@ -254,7 +254,7 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 
 		fileInfos, err = xfs.listFileInfo(currentInode.inodeCore.Ino)
 		if err != nil {
-			return nil, xerrors.Errorf("failed to list directory entries inode: %d: %w", inode.inodeCore.Ino, err)
+			return nil, xerrors.Errorf("failed to list directory entries inode: %d: %w", currentInode.inodeCore.Ino, err)
 		}
 
 		// list last directory
@@ -285,7 +285,7 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 	for _, entry := range entries {
 		inode, err := xfs.ParseInode(entry.InodeNumber())
 		if err != nil {
-			return nil, xerrors.Errorf("failed to parse inode: %w", err)
+			return nil, xerrors.Errorf("failed to parse inode %d: %w", entry.InodeNumber(), err)
 		}
 		// TODO: mode use inode.InodeCore.Mode
 		fileInfos = append(fileInfos,
@@ -321,18 +321,24 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 
 		for _, b := range inode.directoryExtents.bmbtRecs {
 			p := b.Unpack()
-			block, err := xfs.parseDir2Block(p)
-			if err != nil {
-				if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
-					return nil, xerrors.Errorf("failed to parse dir2 block: %w", err)
+			for i := 0; i < int(p.BlockCount); i++ {
+				block, err := xfs.parseDir2Block(p)
+				if err != nil {
+					if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
+						return nil, xerrors.Errorf("failed to parse dir2 block: %w", err)
+					}
+					log.Logger.Warn(err)
 				}
-				log.Logger.Warn(err)
-			}
-			if block == nil {
-				break
-			}
-			for _, entry := range block.Entries {
-				entries = append(entries, entry)
+
+				if block == nil {
+					break
+				}
+
+				for _, entry := range block.Entries {
+					entries = append(entries, entry)
+				}
+				p.StartBlock++
+				p.StartOff++
 			}
 		}
 	} else {
