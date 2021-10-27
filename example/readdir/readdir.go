@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	f, err := os.Open("/Users/masahiro331/work/go/src/github.com/masahiro331/go-xfs-filesystem/Linux.img")
+	f, err := os.Open("path your linux.img")
 	if err != nil {
 		log.Fatal(err)
 	}
