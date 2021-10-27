@@ -309,7 +309,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		}
 	case XFS_DINODE_FMT_BTREE:
 		if inode.inodeCore.IsDir() {
-			log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS Directory")
+			log.Logger.Warn("not support XFS_DINODE_FMT_BTREE Directory")
 		} else if inode.inodeCore.IsRegular() {
 			inode.regularBtree = &RegularBtree{}
 			if err := binary.Read(r, binary.BigEndian, &inode.regularBtree.bmbrBlock); err != nil {
