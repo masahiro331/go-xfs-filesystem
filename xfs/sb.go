@@ -25,7 +25,7 @@ type SuperBlock struct {
 	Sectlog    uint8
 	Inodelog   uint8
 	Inopblog   uint8
-	Agdlklog   uint8
+	Agblklog   uint8
 	Rextslog   uint8
 	Inprogress uint8
 	ImaxPct    uint8
@@ -63,7 +63,7 @@ type SuperBlock struct {
 
 // return (AG number), (Inode Block), (Inode Offset)
 func (sb SuperBlock) InodeOffset(inodeNumber uint64) (int, uint64, uint64) {
-	offsetAddress := sb.Inopblog + sb.Agdlklog
+	offsetAddress := sb.Inopblog + sb.Agblklog
 	lowMask := (1<<(offsetAddress) - 1)
 	AGNumber := inodeNumber >> uint32(offsetAddress)
 
@@ -86,11 +86,11 @@ func (sb SuperBlock) InodeAbsOffset(inodeNumber uint64) uint64 {
 }
 
 func (sb SuperBlock) BlockToAgNumber(n uint64) uint64 {
-	return n >> uint64(sb.Agdlklog)
+	return n >> uint64(sb.Agblklog)
 }
 
 func (sb SuperBlock) BlockToAgBlockNumber(n uint64) uint64 {
-	return n & Mask64Lo(int(sb.Agdlklog))
+	return n & Mask64Lo(int(sb.Agblklog))
 }
 
 func (sb SuperBlock) BlockToPhysicalOffset(n uint64) int64 {

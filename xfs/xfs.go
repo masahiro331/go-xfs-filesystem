@@ -150,7 +150,7 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	for _, entry := range dirEntries {
 		if !entry.IsDir() && entry.Name() == fileName {
 			if dir, ok := entry.(dirEntry); ok {
-				if dir.Type().Perm()&0xA000 == 0 {
+				if dir.Type().Perm()&0xA000 != 0 {
 					return nil, ErrOpenSymlink
 				}
 
