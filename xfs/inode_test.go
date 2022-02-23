@@ -77,7 +77,7 @@ func TestParseInode(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := NewFileSystem(f)
+			fileSystem, err := NewFS(f)
 			if err != nil {
 				t.Fatal(err)
 			}

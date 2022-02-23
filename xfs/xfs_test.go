@@ -58,7 +58,7 @@ func TestFileSystemCheckFileExtents(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFileSystem(f)
+			fileSystem, err := xfs.NewFS(f)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +133,7 @@ func TestFileSystemCheckWalkDir(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fileSystem, err := xfs.NewFileSystem(f)
+			fileSystem, err := xfs.NewFS(f)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +212,7 @@ func TestFileSystemCheckReadDir(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFileSystem(f)
+			fileSystem, err := xfs.NewFS(f)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,7 +247,7 @@ func TestFileSystemCheckReadFile(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFileSystem(f)
+			fileSystem, err := xfs.NewFS(f)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -174,13 +174,13 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	return nil, fs.ErrNotExist
 }
 
-func NewFileSystem(f *os.File) (*FileSystem, error) {
+func NewFS(f *os.File) (*FileSystem, error) {
 	primaryAG, err := ParseAG(f)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", nil)
 	}
 
-	fs := FileSystem{
+	fileSystem := FileSystem{
 		file:      f,
 		PrimaryAG: *primaryAG,
 		AGs:       []AG{*primaryAG},
@@ -196,9 +196,9 @@ func NewFileSystem(f *os.File) (*FileSystem, error) {
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse allocation group %d: %w", i, err)
 		}
-		fs.AGs = append(fs.AGs, *ag)
+		fileSystem.AGs = append(fileSystem.AGs, *ag)
 	}
-	return &fs, nil
+	return &fileSystem, nil
 }
 
 func (xfs *FileSystem) seekInode(n uint64) (int64, error) {

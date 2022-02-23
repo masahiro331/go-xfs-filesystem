@@ -13,7 +13,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	filesystem, err := xfs.NewFileSystem(f)
+	filesystem, err := xfs.NewFS(f)
 	if err != nil {
 		log.Fatal(err)
 	}
