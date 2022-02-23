@@ -2,7 +2,6 @@ package xfs
 
 import (
 	"bytes"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -13,7 +12,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -40,11 +38,13 @@ func (xfs *FileSystem) Close() error {
 }
 
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
+	const op = "stat"
+
 	f, err := xfs.Open(name)
 	if err != nil {
 		info, err := xfs.ReadDirInfo(name)
 		if err != nil {
-			return nil, xerrors.Errorf("failed to read dir info: %w", err)
+			return nil, xfs.wrapError(op, name, xerrors.Errorf("failed to read dir info: %w", err))
 		}
 		return info, nil
 	}
@@ -141,7 +141,7 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		return nil, xfs.wrapError(op, name, fs.ErrInvalid)
 	}
 
-	dirName, fileName := path.Split(name)
+	dirName, fileName := filepath.Split(name)
 	dirEntries, err := xfs.ReadDir(dirName)
 	if err != nil {
 		return nil, xfs.wrapError(op, name, xerrors.Errorf("railed to read directory: %w", err))
@@ -172,21 +172,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		}
 	}
 	return nil, fs.ErrNotExist
-}
-
-func IsValid(r io.Reader) (io.Reader, bool, error) {
-	buf := make([]byte, utils.BlockSize)
-	n, err := r.Read(buf)
-	if err != nil {
-		return nil, false, xerrors.Errorf("failed to read block: %w", err)
-	}
-
-	_, err = ParseAG(bytes.NewReader(buf[:n]))
-	if err != nil {
-		return io.MultiReader(bytes.NewReader(buf[:n]), r), false, nil
-	}
-
-	return io.MultiReader(bytes.NewReader(buf[:n]), r), true, nil
 }
 
 func NewFileSystem(f *os.File) (*FileSystem, error) {
@@ -246,16 +231,21 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 	}
 
 	currentInode := inode
-	dirs := strings.Split(strings.Trim(name, string(filepath.Separator)), string(filepath.Separator))
+	dirs := strings.Split(strings.Trim(filepath.Clean(name), string(filepath.Separator)), string(filepath.Separator))
 	for i, dir := range dirs {
+		found := false
 		for _, fileInfo := range fileInfos {
 			if fileInfo.Name() == dir {
 				if !fileInfo.IsDir() {
 					return nil, xerrors.Errorf("%s is file, directory: %w", fileInfo.Name(), fs.ErrNotExist)
 				}
+				found = true
 				currentInode = fileInfo.inode
 				break
 			}
+		}
+		if !found {
+			return nil, fs.ErrNotExist
 		}
 
 		fileInfos, err = xfs.listFileInfo(currentInode.inodeCore.Ino)
