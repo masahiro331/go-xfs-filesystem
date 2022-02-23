@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -31,6 +32,41 @@ type FileSystem struct {
 	file      *os.File
 	PrimaryAG AG
 	AGs       []AG
+}
+
+func Verify(r io.Reader) bool {
+	_, err := parseSuperBlock(r)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func NewFS(f *os.File) (*FileSystem, error) {
+	primaryAG, err := ParseAG(f)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", nil)
+	}
+
+	fileSystem := FileSystem{
+		file:      f,
+		PrimaryAG: *primaryAG,
+		AGs:       []AG{*primaryAG},
+	}
+
+	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
+	for i := uint64(1); i < uint64(primaryAG.SuperBlock.Agcount); i++ {
+		_, err := f.Seek(int64(AGSize*i), 0)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to seek file: %w", err)
+		}
+		ag, err := ParseAG(f)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse allocation group %d: %w", i, err)
+		}
+		fileSystem.AGs = append(fileSystem.AGs, *ag)
+	}
+	return &fileSystem, nil
 }
 
 func (xfs *FileSystem) Close() error {
@@ -172,33 +208,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		}
 	}
 	return nil, fs.ErrNotExist
-}
-
-func NewFS(f *os.File) (*FileSystem, error) {
-	primaryAG, err := ParseAG(f)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", nil)
-	}
-
-	fileSystem := FileSystem{
-		file:      f,
-		PrimaryAG: *primaryAG,
-		AGs:       []AG{*primaryAG},
-	}
-
-	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
-	for i := uint64(1); i < uint64(primaryAG.SuperBlock.Agcount); i++ {
-		_, err := f.Seek(int64(AGSize*i), 0)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek file: %w", err)
-		}
-		ag, err := ParseAG(f)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to parse allocation group %d: %w", i, err)
-		}
-		fileSystem.AGs = append(fileSystem.AGs, *ag)
-	}
-	return &fileSystem, nil
 }
 
 func (xfs *FileSystem) seekInode(n uint64) (int64, error) {

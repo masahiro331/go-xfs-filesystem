@@ -110,22 +110,32 @@ type BtreeShortBlock struct {
 	CRC      uint32
 }
 
+func parseSuperBlock(r io.Reader) (SuperBlock, error) {
+	var sb SuperBlock
+	buf, err := utils.ReadSector(r)
+	if err != nil {
+		return SuperBlock{}, xerrors.Errorf("failed to create superblock reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &sb); err != nil {
+		return SuperBlock{}, xerrors.Errorf("failed to read superblock: %w", err)
+	}
+	if sb.Magicnum != XFS_SB_MAGIC {
+		return SuperBlock{}, xerrors.Errorf("failed to parse superblock magic byte error: %08x", sb.Magicnum)
+	}
+	return sb, nil
+}
+
 func ParseAG(reader io.Reader) (*AG, error) {
 	r := io.LimitReader(reader, int64(utils.BlockSize))
 
 	var ag AG
-	buf, err := utils.ReadSector(r)
+	var err error
+	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create superblock reader: %w", err)
-	}
-	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.SuperBlock); err != nil {
-		return nil, xerrors.Errorf("failed to read superblock: %w", err)
-	}
-	if ag.SuperBlock.Magicnum != XFS_SB_MAGIC {
-		return nil, xerrors.Errorf("failed to parse superblock magic byte error: %08x", ag.SuperBlock.Magicnum)
+		return nil, xerrors.Errorf("failed to parse super block: %w", err)
 	}
 
-	buf, err = utils.ReadSector(r)
+	buf, err := utils.ReadSector(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create afg reader: %w", err)
 	}
