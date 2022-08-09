@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"io/fs"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -29,7 +28,7 @@ var (
 
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {
-	file      *os.File
+	r         *io.SectionReader
 	PrimaryAG AG
 	AGs       []AG
 }
@@ -42,25 +41,25 @@ func Verify(r io.Reader) bool {
 	return true
 }
 
-func NewFS(f *os.File) (*FileSystem, error) {
-	primaryAG, err := ParseAG(f)
+func NewFS(r io.SectionReader) (*FileSystem, error) {
+	primaryAG, err := ParseAG(&r)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", nil)
+		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", err)
 	}
 
 	fileSystem := FileSystem{
-		file:      f,
+		r:         &r,
 		PrimaryAG: *primaryAG,
 		AGs:       []AG{*primaryAG},
 	}
 
 	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
 	for i := uint64(1); i < uint64(primaryAG.SuperBlock.Agcount); i++ {
-		_, err := f.Seek(int64(AGSize*i), 0)
+		_, err := r.Seek(int64(AGSize*i), 0)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to seek file: %w", err)
 		}
-		ag, err := ParseAG(f)
+		ag, err := ParseAG(&r)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse allocation group %d: %w", i, err)
 		}
@@ -70,7 +69,7 @@ func NewFS(f *os.File) (*FileSystem, error) {
 }
 
 func (xfs *FileSystem) Close() error {
-	return xfs.file.Close()
+	return nil
 }
 
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
@@ -211,16 +210,16 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 }
 
 func (xfs *FileSystem) seekInode(n uint64) (int64, error) {
-	return xfs.file.Seek(int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n)), 0)
+	return xfs.r.Seek(int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n)), 0)
 }
 
 func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
-	return xfs.file.Seek(n*int64(xfs.PrimaryAG.SuperBlock.BlockSize), 0)
+	return xfs.r.Seek(n*int64(xfs.PrimaryAG.SuperBlock.BlockSize), 0)
 }
 
 func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
 	buf := make([]byte, xfs.PrimaryAG.SuperBlock.BlockSize*count)
-	_, err := xfs.file.Read(buf)
+	_, err := xfs.r.Read(buf)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read file error: %w", err)
 	}

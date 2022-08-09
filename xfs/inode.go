@@ -235,7 +235,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		return nil, xerrors.Errorf("failed to seek inode: %w", err)
 	}
 
-	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.Inodesize))
+	r := io.LimitReader(xfs.r, int64(xfs.PrimaryAG.SuperBlock.Inodesize))
 
 	inode := Inode{}
 
@@ -493,7 +493,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	}
 
 	// TODO: add tests, If Block count greater than 2
-	r := io.LimitReader(xfs.file, int64(xfs.PrimaryAG.SuperBlock.BlockSize))
+	r := io.LimitReader(xfs.r, int64(xfs.PrimaryAG.SuperBlock.BlockSize))
 	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
 		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
 	}
