@@ -252,7 +252,8 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 				break
 			}
 		}
-		if !found {
+		// when dir string is empty ("", "."), that is root directory
+		if !found && (dir != "" && dir != ".") {
 			return nil, fs.ErrNotExist
 		}
 
