@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"io"
 
 	"golang.org/x/xerrors"
@@ -12,13 +13,21 @@ const (
 )
 
 func ReadBlock(r io.Reader) ([]byte, error) {
-	buf := make([]byte, BlockSize)
-	i, err := r.Read(buf)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to read: %w", err)
+	buf := make([]byte, 0, BlockSize)
+	for i := 0; i < BlockSize/SectorSize; i++ {
+		b := make([]byte, SectorSize)
+		i, err := r.Read(b)
+		if i != 512 {
+			return nil, fmt.Errorf("failed to read sector invalid size expected(%d), actual(%d)", SectorSize, i)
+		}
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read: %w", err)
+		}
+		buf = append(buf, b...)
 	}
-	if i != BlockSize {
-		return nil, xerrors.Errorf("block size error, read %d byte", i)
+
+	if len(buf) != BlockSize {
+		return nil, fmt.Errorf("block size error, expected(%d), actual(%d)", BlockSize, len(buf))
 	}
 
 	return buf, nil

@@ -10,6 +10,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
+	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -235,7 +236,11 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		return nil, xerrors.Errorf("failed to seek inode: %w", err)
 	}
 
-	r := io.LimitReader(xfs.r, int64(xfs.PrimaryAG.SuperBlock.Inodesize))
+	buf, err := utils.ReadSector(xfs.r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read sector: %w", err)
+	}
+	r := bytes.NewReader(buf)
 
 	inode := Inode{}
 
@@ -493,7 +498,11 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	}
 
 	// TODO: add tests, If Block count greater than 2
-	r := io.LimitReader(xfs.r, int64(xfs.PrimaryAG.SuperBlock.BlockSize))
+	b, err := utils.ReadBlock(xfs.r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read block: %w", err)
+	}
+	r := bytes.NewReader(b)
 	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
 		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
 	}
