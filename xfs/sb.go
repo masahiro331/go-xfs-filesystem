@@ -3,12 +3,12 @@ package xfs
 type SuperBlock struct {
 	Magicnum   uint32
 	BlockSize  uint32
-	Dblocks    uint64   // rfsblock
-	Rblocks    uint64   // rfsblock
-	Rextens    uint64   // rtblock
-	UUID       [16]byte // uuid_t
-	Logstart   uint64   // fsblock
-	Rootino    uint64   // ino
+	Dblocks    uint64
+	Rblocks    uint64
+	Rextens    uint64
+	UUID       [16]byte
+	Logstart   uint64
+	Rootino    uint64
 	Rbmino     uint64
 	Rsmino     uint64
 	Rextsize   uint32
@@ -71,7 +71,7 @@ func (sb SuperBlock) InodeOffset(inodeNumber uint64) (int, uint64, uint64) {
 	InodeBlock := relativeInodeNumber / uint64(sb.Inopblock)
 	InodeOffset := relativeInodeNumber % uint64(sb.Inopblock)
 
-	return int(AGNumber), uint64(InodeBlock), uint64(InodeOffset)
+	return int(AGNumber), InodeBlock, InodeOffset
 }
 
 // return Offset

@@ -273,16 +273,19 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 			for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
 				entry, err := parseEntry(r, isI8count)
 				if err != nil {
-					return nil, xerrors.Errorf("failed to parse %d-th entry: %w", i, err)
+					return nil, xerrors.Errorf("failed to parse entries[%d]: %w", i, err)
 				}
 				inode.directoryLocal.entries = append(inode.directoryLocal.entries, *entry)
 			}
 		} else if inode.inodeCore.IsSymlink() {
 			inode.symlinkString = &SymlinkString{}
 			buf := make([]byte, inode.inodeCore.Size)
-			_, err := r.Read(buf)
+			n, err := r.Read(buf)
 			if err != nil {
 				return nil, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL symlink error: %w", err)
+			}
+			if uint64(n) != inode.inodeCore.Size {
+				return nil, xerrors.Errorf(ErrReadSizeFormat, n, inode.inodeCore.Size)
 			}
 			inode.symlinkString.Name = string(buf)
 		} else {
@@ -610,7 +613,7 @@ func (e Dir2DataEntry) Name() string {
 }
 
 func (e Dir2SfEntry) InodeNumber() uint64 {
-	return uint64(e.Inumber)
+	return e.Inumber
 }
 
 func (e Dir2DataEntry) InodeNumber() uint64 {

@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 	"io"
 	"io/fs"
 	"path"
@@ -26,6 +27,11 @@ var (
 	ErrOpenSymlink = xerrors.New("symlink open not support")
 )
 
+var (
+	ErrReadSizeFormat   = "failed to read size error: actual(%d), expected(%d)"
+	ErrSeekOffsetFormat = "failed to seek offset error: actual(%d), expected(%d)"
+)
+
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {
 	r         *io.SectionReader
@@ -33,7 +39,7 @@ type FileSystem struct {
 	AGs       []AG
 }
 
-func Verify(r io.Reader) bool {
+func Check(r io.Reader) bool {
 	_, err := parseSuperBlock(r)
 	if err != nil {
 		return false
@@ -55,9 +61,12 @@ func NewFS(r io.SectionReader) (*FileSystem, error) {
 
 	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
 	for i := uint64(1); i < uint64(primaryAG.SuperBlock.Agcount); i++ {
-		_, err := r.Seek(int64(AGSize*i), 0)
+		n, err := r.Seek(int64(AGSize*i), 0)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to seek file: %w", err)
+		}
+		if n != int64(AGSize*i) {
+			return nil, xerrors.Errorf(ErrSeekOffsetFormat, n, AGSize*i)
 		}
 		ag, err := ParseAG(&r)
 		if err != nil {
@@ -210,21 +219,39 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 }
 
 func (xfs *FileSystem) seekInode(n uint64) (int64, error) {
-	return xfs.r.Seek(int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n)), 0)
+	offset := int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n))
+	off, err := xfs.r.Seek(offset, io.SeekStart)
+	if err != nil {
+		return 0, err
+	}
+	if off != offset {
+		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
+	}
+	return off, nil
 }
 
 func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
-	return xfs.r.Seek(n*int64(xfs.PrimaryAG.SuperBlock.BlockSize), 0)
+	offset := n * int64(xfs.PrimaryAG.SuperBlock.BlockSize)
+	off, err := xfs.r.Seek(offset, io.SeekStart)
+	if err != nil {
+		return 0, err
+	}
+	if off != offset {
+		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
+	}
+	return off, nil
 }
 
 func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
-	buf := make([]byte, xfs.PrimaryAG.SuperBlock.BlockSize*count)
-	_, err := xfs.r.Read(buf)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to read file error: %w", err)
+	buf := make([]byte, 0, xfs.PrimaryAG.SuperBlock.BlockSize*count)
+	for i := uint32(0); i < count; i++ {
+		b, err := utils.ReadBlock(xfs.r)
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, b...)
 	}
-
-	return buf, err
+	return buf, nil
 }
 
 func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
