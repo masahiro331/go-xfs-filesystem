@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.14.x, 1.15.x]
+        go-version: [1.19.x]
     steps:
       - name: Install Go
         uses: actions/setup-go@v2
@@ -13,10 +13,5 @@ jobs:
           go-version: ${{ matrix.go-version }}
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Lint
-        uses: golangci/golangci-lint-action@v2
-        with:
-          version: v1.31
-          args: --deadline=30m
       - name: Run unit tests
         run: go test ./...
