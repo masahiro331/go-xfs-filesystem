@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -76,8 +77,12 @@ func TestParseInode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			info, err := f.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-			fileSystem, err := NewFS(f)
+			fileSystem, err := NewFS(*io.NewSectionReader(f, 0, info.Size()))
 			if err != nil {
 				t.Fatal(err)
 			}

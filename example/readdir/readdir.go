@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 
@@ -13,7 +14,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	filesystem, err := xfs.NewFS(f)
+	info, err := f.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	filesystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()))
 	if err != nil {
 		log.Fatal(err)
 	}
