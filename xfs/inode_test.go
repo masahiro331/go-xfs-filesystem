@@ -82,7 +82,7 @@ func TestParseInode(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := NewFS(*io.NewSectionReader(f, 0, info.Size()))
+			fileSystem, err := NewFS(*io.NewSectionReader(f, 0, info.Size()), nil)
 			if err != nil {
 				t.Fatal(err)
 			}

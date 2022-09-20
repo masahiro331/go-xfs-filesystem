@@ -18,7 +18,7 @@ var (
 
 	UnsupportedDir2BlockHeaderErr = xerrors.New("unsupported block")
 
-	XFS_DIR2_SPACE_SIZE  = 1 << (32 + XFS_DIR2_DATA_ALIGN_LOG)
+	XFS_DIR2_SPACE_SIZE  = int64(1) << (32 + XFS_DIR2_DATA_ALIGN_LOG)
 	XFS_DIR2_DATA_OFFSET = XFS_DIR2_DATA_SPACE * XFS_DIR2_SPACE_SIZE
 	XFS_DIR2_LEAF_OFFSET = XFS_DIR2_LEAF_SPACE * XFS_DIR2_SPACE_SIZE
 	XFS_DIR2_FREE_OFFSET = XFS_DIR2_FREE_SPACE * XFS_DIR2_SPACE_SIZE
@@ -95,7 +95,6 @@ type BmbtKey struct {
 	StartOff uint64
 }
 
-//
 type BmbtPtr uint64
 
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
@@ -231,6 +230,15 @@ type InobtRec struct {
 }
 
 func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
+	var inode Inode
+	c, ok := xfs.cache.Get(inodeCacheKey(ino))
+	if ok {
+		i, ok := c.(Inode)
+		if ok {
+			return &i, nil
+		}
+	}
+
 	_, err := xfs.seekInode(ino)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to seek inode: %w", err)
@@ -241,8 +249,6 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		return nil, xerrors.Errorf("failed to read sector: %w", err)
 	}
 	r := bytes.NewReader(buf)
-
-	inode := Inode{}
 
 	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore); err != nil {
 		return nil, xerrors.Errorf("failed to read InodeCore: %w", err)
@@ -364,6 +370,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	// 	panic("has extend attribute fork")
 	// }
 
+	xfs.cache.Add(inodeCacheKey(ino), inode)
 	return &inode, nil
 }
 

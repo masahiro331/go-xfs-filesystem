@@ -49,7 +49,7 @@ const (
 )
 
 const (
-	XFS_DIR2_DATA_SPACE = iota
+	XFS_DIR2_DATA_SPACE int64 = iota
 	XFS_DIR2_LEAF_SPACE
 	XFS_DIR2_FREE_SPACE
 )

@@ -37,6 +37,8 @@ type FileSystem struct {
 	r         *io.SectionReader
 	PrimaryAG AG
 	AGs       []AG
+
+	cache Cache
 }
 
 func Check(r io.Reader) bool {
@@ -47,16 +49,20 @@ func Check(r io.Reader) bool {
 	return true
 }
 
-func NewFS(r io.SectionReader) (*FileSystem, error) {
+func NewFS(r io.SectionReader, cache Cache) (*FileSystem, error) {
 	primaryAG, err := ParseAG(&r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", err)
 	}
 
+	if cache == nil {
+		cache = &mockCache{}
+	}
 	fileSystem := FileSystem{
 		r:         &r,
 		PrimaryAG: *primaryAG,
 		AGs:       []AG{*primaryAG},
+		cache:     cache,
 	}
 
 	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
