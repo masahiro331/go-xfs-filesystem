@@ -103,20 +103,40 @@ func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 
 func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 	var buf []byte
-	for _, rec := range inode.regularExtent.bmbtRecs {
-		p := rec.Unpack()
-		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
-		_, err := xfs.seekBlock(physicalBlockOffset)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek block: %w", err)
-		}
-		b, err := xfs.readBlock(uint32(p.BlockCount))
-		if err != nil {
-			return nil, xerrors.Errorf("failed to read block: %w", err)
-		}
+	if inode.regularExtent != nil {
+		for _, rec := range inode.regularExtent.bmbtRecs {
+			p := rec.Unpack()
+			physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
+			_, err := xfs.seekBlock(physicalBlockOffset)
+			if err != nil {
+				return nil, xerrors.Errorf("failed to seek block: %w", err)
+			}
+			b, err := xfs.readBlock(uint32(p.BlockCount))
+			if err != nil {
+				return nil, xerrors.Errorf("failed to read block: %w", err)
+			}
 
-		buf = append(buf, b...)
+			buf = append(buf, b...)
+		}
 	}
+
+	// TODO: implement regular b+tree extent.
+	// Ref. XFS specification [17.2] B+tree Extent List
+	if inode.regularBtree != nil {
+		return make([]byte, inode.inodeCore.Size), nil
+	}
+
+	if uint64(len(buf)) < inode.inodeCore.Size {
+		// TODO: FIXME
+		// This statement is unspecified error.
+		// #　How to reproduce
+		// $ 7z x export-i-001fc377f6b8654ce-disk-1.vmdk
+		// $ xfs_db Linux
+		// $ inode 12805824
+		// $ print
+		return make([]byte, inode.inodeCore.Size), nil
+	}
+
 	return buf[:inode.inodeCore.Size], nil
 }
 
@@ -202,10 +222,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 			if dir, ok := entry.(dirEntry); ok {
 				if dir.Type().Perm()&0xA000 != 0 {
 					return nil, ErrOpenSymlink
-				}
-
-				if dir.inode.regularExtent == nil {
-					return nil, xerrors.Errorf("regular extent empty: %v", fs.ErrNotExist)
 				}
 
 				buf, err := xfs.newFile(dir.inode)

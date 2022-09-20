@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"io/ioutil"
 	"unsafe"
 
 	"golang.org/x/xerrors"
@@ -83,11 +82,23 @@ type BmbrBlock struct {
 	Numrecs uint16
 }
 
+// BtreeBlock is almost BmbtBlock
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1868
 type BtreeBlock struct {
-	Magic   uint32
-	Level   uint16
-	Numrecs uint16
+	Magic      uint32
+	Level      uint16 // tree level, 0 is leaf block.
+	Numrecs    uint16
+	BbLeftsib  int64
+	BbRightsib int64
+
+	// Long version header
+	// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1855
+	BbBlockNo uint64
+	BbLsn     uint64
+	UUID      [16]byte
+	BbOwner   uint64
+	CRC       uint32
+	Padding   int32
 }
 
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1821
@@ -374,6 +385,39 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	return &inode, nil
 }
 
+func (xfs *FileSystem) parseBtreeBlock(blockNumber int64) (*BtreeBlock, error) {
+	_, err := xfs.seekBlock(blockNumber)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to seek block: %w", err)
+	}
+	b, err := xfs.readBlock(1)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read block: %w", err)
+	}
+	r := bytes.NewReader(b)
+	btreeBlock := &BtreeBlock{}
+	if err := binary.Read(r, binary.BigEndian, btreeBlock); err != nil {
+		return nil, xerrors.Errorf("failed to read b+tree block: %w", err)
+	}
+	if btreeBlock.Magic != XFS_BMAP_CRC_MAGIC {
+		return nil, xerrors.Errorf("unsupported block header: (%d), expected BMAP_CRC_MAGIC", btreeBlock.Magic)
+	}
+
+	if btreeBlock.Level > 1 {
+		return nil, xerrors.Errorf("unsupported deep b+tree level: %d", btreeBlock.Level)
+	}
+
+	recs := []BmbtRec{}
+	for i := uint16(0); i < btreeBlock.Numrecs; i++ {
+		var bmbtRec BmbtRec
+		if err := binary.Read(r, binary.BigEndian, &bmbtRec); err != nil {
+			return nil, xerrors.Errorf("failed to read extents xfs_bmbt_irec: %w", err)
+		}
+		recs = append(recs, bmbtRec)
+	}
+	return btreeBlock, nil
+}
+
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L316
 func BmbrMaxRecs(blocklen int) int {
 	return blocklen / 16
@@ -393,7 +437,7 @@ func (i *Inode) AttributeOffset() uint32 {
 
 // Parse XDB3block, XDB3 block is single block architecture
 func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read XDB3 block reader: %w", err)
 	}
