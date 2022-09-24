@@ -71,75 +71,82 @@ Use Linux OS. (This command use CentOS 8)
 # make xfs image
 
 # minimum xfs filesystem , BootSector 4 block, xfs 16 block
-dd of=Linux.img count=0 seek=1 bs=20971520
+dd of=Linux.img count=0 seek=1 bs=41943040 
 
 sudo losetup -f
-sudo losetup /dev/loop0 Linux.img
-sudo parted /dev/loop0 -s mklabel gpt -s mkpart primary xfs 0 100%
+DEVICE=/dev/loop6
+sudo losetup $DEVICE Linux.img
+sudo parted $DEVICE -s mklabel gpt -s mkpart primary xfs 0 100%
 
 
-sudo mkfs.xfs /dev/loop0p1
+sudo mkfs.xfs ${DEVICE}p1
 
 
 # mount
 sudo mkdir /mnt/xfs
-sudo mount /dev/loop0p1 /mnt/xfs
-chmod 755 /mnt/xfs
+sudo mount ${DEVICE}p1 /mnt/xfs
+sudo chmod 755 /mnt/xfs
 
 # Write test datas
 
 ## local directory
-mkdir /mnt/xfs/fmt_local_directory
-mkdir /mnt/xfs/fmt_local_directory/short_form
+sudo mkdir /mnt/xfs/fmt_local_directory
+sudo mkdir /mnt/xfs/fmt_local_directory/short_form
 
 # block directories
-mkdir /mnt/xfs/fmt_extents_block_directories
-mkdir /mnt/xfs/fmt_extents_block_directories/1
-mkdir /mnt/xfs/fmt_extents_block_directories/2
-mkdir /mnt/xfs/fmt_extents_block_directories/3
-mkdir /mnt/xfs/fmt_extents_block_directories/4
-mkdir /mnt/xfs/fmt_extents_block_directories/5
-mkdir /mnt/xfs/fmt_extents_block_directories/6
-mkdir /mnt/xfs/fmt_extents_block_directories/7
-mkdir /mnt/xfs/fmt_extents_block_directories/8
+sudo mkdir /mnt/xfs/fmt_extents_block_directories
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/1
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/2
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/3
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/4
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/5
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/6
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/7
+sudo mkdir /mnt/xfs/fmt_extents_block_directories/8
 
 # leaf directories
-mkdir /mnt/xfs/fmt_leaf_directories/
+sudo mkdir /mnt/xfs/fmt_leaf_directories/
+
+dd bs=4096 count=1 if=/dev/zero of=4096
+dd bs=1024 count=1 if=/dev/zero of=1024
+dd bs=16384  count=1 if=/dev/zero of=16384
+dd bs=8388608 count=1 if=/dev/zero of=8388608
 
 for i in `seq 1 200`
 do
-    cp 4096 /mnt/xfs/fmt_leaf_directories/$i
+    sudo cp 4096 /mnt/xfs/fmt_leaf_directories/$i
 done
 
 # node directories
-mkdir /mnt/xfs/fmt_node_directories/
+sudo mkdir /mnt/xfs/fmt_node_directories/
 
 for i in `seq 1 1024`
 do
-    cp 4096 /mnt/xfs/fmt_node_directories/$i
+    sudo cp 4096 /mnt/xfs/fmt_node_directories/$i
 done
 
 
 # extents files
-cp 1024  /mnt/xfs/fmt_extents_file_1024
-cp 4096  /mnt/xfs/fmt_extents_file_4096
-cp 16384 /mnt/xfs/fmt_extents_file_16384
+sudo cp 1024  /mnt/xfs/fmt_extents_file_1024
+sudo cp 4096  /mnt/xfs/fmt_extents_file_4096
+sudo cp 16384 /mnt/xfs/fmt_extents_file_16384
+sudo cp 8388608 /mnt/xfs/fmt_extents_file_8388608
 
 # nested directories
-mkdir -p /mnt/xfs/parent/child/child/child/child/child/
-cp 1024  /mnt/xfs/parent/child/child/child/child/child/executable
-chmod +x /mnt/xfs/parent/child/child/child/child/child/executable
-cp 1024  /mnt/xfs/parent/child/child/child/child/executable
-chmod +x /mnt/xfs/parent/child/child/child/child/executable
-cp 1024  /mnt/xfs/parent/child/child/child/child/nonexecutable
+sudo mkdir -p /mnt/xfs/parent/child/child/child/child/child/
+sudo cp 1024  /mnt/xfs/parent/child/child/child/child/child/executable
+sudo chmod +x /mnt/xfs/parent/child/child/child/child/child/executable
+sudo cp 1024  /mnt/xfs/parent/child/child/child/child/executable
+sudo chmod +x /mnt/xfs/parent/child/child/child/child/executable
+sudo cp 1024  /mnt/xfs/parent/child/child/child/child/nonexecutable
 
 # etc/os-release
-mkdir -p /mnt/xfs/etc
-cp /etc/os-release  /mnt/xfs/etc/os-release
+sudo mkdir -p /mnt/xfs/etc
+sudo cp /etc/os-release  /mnt/xfs/etc/os-release
 
 # remove
 sudo umount /mnt/xfs
-sudo losetup -d /dev/loop0
+sudo losetup -d ${DEVICE}
 ```
 
 ## extract xfs data in Linux.img
