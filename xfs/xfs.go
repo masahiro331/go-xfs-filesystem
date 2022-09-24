@@ -131,10 +131,12 @@ func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 		// TODO: FIXME
 		// This statement is unspecified error.
 		// #　How to reproduce
-		// $ 7z x export-i-001fc377f6b8654ce-disk-1.vmdk
+		// $ oras pull ghcr.io/masahiro331/test-vm/ami.vmdk:latest
+		// $ 7z x ami.vmdk
 		// $ xfs_db Linux
 		// $ inode 12805824
 		// $ print
+		log.Logger.Warnf("failed to read inode(%v), fileSize miss match: actual(%d), expected(%d)", inode.inodeCore.Size, len(buf), inode.inodeCore.Size)
 		return make([]byte, inode.inodeCore.Size), nil
 	}
 
