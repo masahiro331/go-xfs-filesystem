@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -63,7 +62,7 @@ func TestFileSystemCheckFileExtents(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()))
+			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +142,7 @@ func TestFileSystemCheckWalkDir(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()))
+			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -226,7 +225,7 @@ func TestFileSystemCheckReadDir(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()))
+			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -265,7 +264,7 @@ func TestFileSystemCheckReadFile(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()))
+			fileSystem, err := xfs.NewFS(*io.NewSectionReader(f, 0, info.Size()), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -278,11 +277,11 @@ func TestFileSystemCheckReadFile(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			buf, err := ioutil.ReadAll(file)
+			buf, err := io.ReadAll(file)
 			if err != nil {
 				t.Fatal(err)
 			}
-			expectedBuf, err := ioutil.ReadAll(expectedFile)
+			expectedBuf, err := io.ReadAll(expectedFile)
 			if err != nil {
 				t.Fatal(err)
 			}
