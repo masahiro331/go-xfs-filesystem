@@ -49,8 +49,7 @@ type RegularExtent struct {
 
 type RegularBtree struct {
 	bmbrBlock BmbrBlock
-	keys      []BmbtKey
-	ptrs      []BmbtPtr
+	bmbtRecs  []BmbtRec
 }
 
 type DirectoryExtents struct {
@@ -80,6 +79,8 @@ type BmbtIrec struct {
 type BmbrBlock struct {
 	Level   uint16
 	Numrecs uint16
+	keys    []BmbtKey
+	ptrs    []BmbtPtr
 }
 
 // BtreeBlock is almost BmbtBlock
@@ -102,9 +103,7 @@ type BtreeBlock struct {
 }
 
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1821
-type BmbtKey struct {
-	StartOff uint64
-}
+type BmbtKey uint64
 
 type BmbtPtr uint64
 
@@ -240,11 +239,213 @@ type InobtRec struct {
 	Free      uint64
 }
 
+func (xfs *FileSystem) inodeFormatDevice(inode Inode) Inode {
+	inode.device = &Device{}
+	return inode
+}
+
+func (xfs *FileSystem) inodeFormatLocal(r io.Reader, inode Inode) (Inode, error) {
+	if inode.inodeCore.IsDir() {
+		inode.directoryLocal = &DirectoryLocal{}
+		if err := binary.Read(r, binary.BigEndian, &inode.directoryLocal.dir2SfHdr); err != nil {
+			return Inode{}, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL directory error: %w", err)
+		}
+
+		var isI8count bool
+		if inode.directoryLocal.dir2SfHdr.I8Count != 0 {
+			isI8count = true
+		}
+		for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
+			entry, err := parseEntry(r, isI8count)
+			if err != nil {
+				return Inode{}, xerrors.Errorf("failed to parse entries[%d]: %w", i, err)
+			}
+			inode.directoryLocal.entries = append(inode.directoryLocal.entries, *entry)
+		}
+	} else if inode.inodeCore.IsSymlink() {
+		inode.symlinkString = &SymlinkString{}
+		buf := make([]byte, inode.inodeCore.Size)
+		n, err := r.Read(buf)
+		if err != nil {
+			return Inode{}, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL symlink error: %w", err)
+		}
+		if uint64(n) != inode.inodeCore.Size {
+			return Inode{}, xerrors.Errorf(ErrReadSizeFormat, n, inode.inodeCore.Size)
+		}
+		inode.symlinkString.Name = string(buf)
+	} else {
+		log.Logger.Warn("not support XFS_DINODE_FMT_LOCAL")
+	}
+	return inode, nil
+}
+
+func (xfs *FileSystem) parseBmbtRecs(r io.Reader, count uint32) ([]BmbtRec, error) {
+	var bmbtRecs []BmbtRec
+	for i := uint32(0); i < count; i++ {
+		var bmbtRec BmbtRec
+		if err := binary.Read(r, binary.BigEndian, &bmbtRec); err != nil {
+			return nil, xerrors.Errorf("read xfs_bmbt_irec error: %w", err)
+		}
+		bmbtRecs = append(bmbtRecs, bmbtRec)
+	}
+	return bmbtRecs, nil
+}
+
+func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, error) {
+	var err error
+	if inode.inodeCore.IsDir() {
+		inode.directoryExtents = &DirectoryExtents{}
+		inode.directoryExtents.bmbtRecs, err = xfs.parseBmbtRecs(r, inode.inodeCore.Nextents)
+		if err != nil {
+			return Inode{}, xerrors.Errorf("failed to parse directory bmbt recs: %w", err)
+		}
+	} else if inode.inodeCore.IsRegular() {
+		inode.regularExtent = &RegularExtent{}
+		inode.regularExtent.bmbtRecs, err = xfs.parseBmbtRecs(r, inode.inodeCore.Nextents)
+		if err != nil {
+			return Inode{}, xerrors.Errorf("failed to parse regular bmbt recs: %w", err)
+		}
+	} else if inode.inodeCore.IsSymlink() {
+		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS isSymlink")
+	} else {
+		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS")
+	}
+
+	return inode, nil
+}
+
+func (xfs *FileSystem) walkBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr, inode Inode) (uint16, []BmbtKey, []BmbtPtr, error) {
+	if level == 1 {
+		return level, keys, ptrs, nil
+	}
+
+	var retKeys []BmbtKey
+	var retPtrs []BmbtPtr
+	for _, ptr := range ptrs {
+		nodeKeys, nodePtrs, err := xfs.parseBtreeNode(int64(ptr), inode)
+		if err != nil {
+			return 0, nil, nil, xerrors.Errorf("parse btree node (inode: %v, ptr: %d) error: %w", inode, ptr, err)
+		}
+		retKeys = append(retKeys, nodeKeys...)
+		retPtrs = append(retPtrs, nodePtrs...)
+	}
+	level--
+	return xfs.walkBtree(level, retKeys, retPtrs, inode)
+}
+
+func (xfs *FileSystem) parseMultiLevelBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr, inode Inode) ([]BmbtRec, error) {
+	_, leafKeys, leafPtrs, err := xfs.walkBtree(level, keys, ptrs, inode)
+	if err != nil {
+		return nil, xerrors.Errorf("walk Btree error: %w", err)
+	}
+	return xfs.parseSingleLevelBtree(leafKeys, leafPtrs)
+}
+
+func (xfs *FileSystem) parseSingleLevelBtree(keys []BmbtKey, ptrs []BmbtPtr) ([]BmbtRec, error) {
+	var ret []BmbtRec
+	for _, ptr := range ptrs {
+		recs, err := xfs.parseBtreeLeafNode(int64(ptr))
+		if err != nil {
+			return nil, xerrors.Errorf("parse btree leaf node(ptr: %d) error: %w", ptr, err)
+		}
+
+		ret = append(ret, recs...)
+	}
+	return ret, nil
+}
+
+func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16) ([]BmbtKey, []BmbtPtr, error) {
+	// parse bmbt keys
+	var keys []BmbtKey
+	for i := uint16(0); i < numrecs; i++ {
+		var key BmbtKey
+		if err := binary.Read(r, binary.BigEndian, &key); err != nil {
+			return nil, nil, xerrors.Errorf("failed to read regular bmbt key: %w", err)
+		}
+		keys = append(keys, key)
+	}
+
+	// read memory align
+	tailKeysCount := BmbrMaxRecs(xfs.DataForkSize(inode.inodeCore.Forkoff)) - int(numrecs)
+	tailBuf := make([]byte, 8*tailKeysCount)
+	n, err := r.Read(tailBuf)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("failed to read tail key buf: %w", err)
+	}
+	if n != len(tailBuf) {
+		return nil, nil, xerrors.Errorf("failed to read tail buf length actual (%d), expected (%d)", n, len(tailBuf))
+	}
+
+	// parse bmbt ptr
+	var ptrs []BmbtPtr
+	for i := uint16(0); i < numrecs; i++ {
+		var ptr BmbtPtr
+		if err := binary.Read(r, binary.BigEndian, &ptr); err != nil {
+			return nil, nil, xerrors.Errorf("failed to read regular bmbt key: %w", err)
+		}
+		ptrs = append(ptrs, ptr)
+	}
+	return keys, ptrs, nil
+}
+
+func (xfs *FileSystem) parseBmbrBlock(r io.Reader, inode Inode) (*BmbrBlock, error) {
+	var bmbrBlock BmbrBlock
+	var err error
+	if err := binary.Read(r, binary.BigEndian, &bmbrBlock.Level); err != nil {
+		return nil, xerrors.Errorf("binary read bmbr block level error: %w", err)
+	}
+	if err := binary.Read(r, binary.BigEndian, &bmbrBlock.Numrecs); err != nil {
+		return nil, xerrors.Errorf("binary read bmbr block numerecs error: %w", err)
+	}
+
+	bmbrBlock.keys, bmbrBlock.ptrs, err = xfs.parseBmbtKeyPtr(r, inode, bmbrBlock.Numrecs)
+	if err != nil {
+		return nil, xerrors.Errorf("parse bmbr key-ptr error: %w", err)
+	}
+	return &bmbrBlock, nil
+}
+
+func (xfs *FileSystem) inodeFormatBtree(r io.Reader, inode Inode) (Inode, error) {
+	if !inode.inodeCore.IsRegular() {
+		log.Logger.Warnf("not support XFS_DINODE_FMT_BTREE type: %+v", inode)
+		return Inode{}, xerrors.Errorf("invalid inode")
+	}
+
+	bmbrBlock, err := xfs.parseBmbrBlock(r, inode)
+	if err != nil {
+		return Inode{}, xerrors.Errorf("parse bmbr block error: %w", err)
+	}
+	btree := &RegularBtree{
+		bmbrBlock: *bmbrBlock,
+	}
+	if bmbrBlock.Level == 1 {
+		btree.bmbtRecs, err = xfs.parseSingleLevelBtree(
+			bmbrBlock.keys,
+			bmbrBlock.ptrs,
+		)
+		if err != nil {
+			return Inode{}, xerrors.Errorf("parse single level btree error: %w", err)
+		}
+	} else if bmbrBlock.Level > 1 {
+		btree.bmbtRecs, err = xfs.parseMultiLevelBtree(
+			bmbrBlock.Level,
+			bmbrBlock.keys,
+			bmbrBlock.ptrs,
+			inode,
+		)
+		if err != nil {
+			return Inode{}, xerrors.Errorf("parse multi level btree error: %w", err)
+		}
+	}
+	inode.regularBtree = btree
+	return inode, nil
+}
+
 func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	var inode Inode
 	c, ok := xfs.cache.Get(inodeCacheKey(ino))
 	if ok {
-		i, ok := c.(Inode)
+		i := c.(Inode)
 		if ok {
 			return &i, nil
 		}
@@ -275,98 +476,21 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 
 	switch inode.inodeCore.Format {
 	case XFS_DINODE_FMT_DEV:
-		inode.device = &Device{}
+		inode = xfs.inodeFormatDevice(inode)
 	case XFS_DINODE_FMT_LOCAL:
-		if inode.inodeCore.IsDir() {
-			inode.directoryLocal = &DirectoryLocal{}
-			if err := binary.Read(r, binary.BigEndian, &inode.directoryLocal.dir2SfHdr); err != nil {
-				return nil, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL directory error: %w", err)
-			}
-
-			var isI8count bool
-			if inode.directoryLocal.dir2SfHdr.I8Count != 0 {
-				isI8count = true
-			}
-			for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
-				entry, err := parseEntry(r, isI8count)
-				if err != nil {
-					return nil, xerrors.Errorf("failed to parse entries[%d]: %w", i, err)
-				}
-				inode.directoryLocal.entries = append(inode.directoryLocal.entries, *entry)
-			}
-		} else if inode.inodeCore.IsSymlink() {
-			inode.symlinkString = &SymlinkString{}
-			buf := make([]byte, inode.inodeCore.Size)
-			n, err := r.Read(buf)
-			if err != nil {
-				return nil, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL symlink error: %w", err)
-			}
-			if uint64(n) != inode.inodeCore.Size {
-				return nil, xerrors.Errorf(ErrReadSizeFormat, n, inode.inodeCore.Size)
-			}
-			inode.symlinkString.Name = string(buf)
-		} else {
-			log.Logger.Warn("not support XFS_DINODE_FMT_LOCAL")
+		inode, err = xfs.inodeFormatLocal(r, inode)
+		if err != nil {
+			return nil, xerrors.Errorf("parse inode format local: %w", err)
 		}
 	case XFS_DINODE_FMT_EXTENTS:
-		if inode.inodeCore.IsDir() {
-			inode.directoryExtents = &DirectoryExtents{}
-			for i := uint32(0); i < inode.inodeCore.Nextents; i++ {
-				var bmbtRec BmbtRec
-				if err := binary.Read(r, binary.BigEndian, &bmbtRec); err != nil {
-					return nil, xerrors.Errorf("failed to read directory xfs_bmbt_irec: %w", err)
-				}
-				inode.directoryExtents.bmbtRecs = append(inode.directoryExtents.bmbtRecs, bmbtRec)
-			}
-		} else if inode.inodeCore.IsRegular() {
-			inode.regularExtent = &RegularExtent{}
-			for i := uint32(0); i < inode.inodeCore.Nextents; i++ {
-				var bmbtRec BmbtRec
-				if err := binary.Read(r, binary.BigEndian, &bmbtRec); err != nil {
-					return nil, xerrors.Errorf("failed to read regular xfs_bmbt_irec: %w", err)
-				}
-				inode.regularExtent.bmbtRecs = append(inode.regularExtent.bmbtRecs, bmbtRec)
-			}
-		} else if inode.inodeCore.IsSymlink() {
-			log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS isSymlink")
-		} else {
-			log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS")
+		inode, err = xfs.inodeFormatExtents(r, inode)
+		if err != nil {
+			return nil, xerrors.Errorf("parse inode format extents: %w", err)
 		}
 	case XFS_DINODE_FMT_BTREE:
-		if inode.inodeCore.IsDir() {
-			log.Logger.Warn("not support XFS_DINODE_FMT_BTREE Directory")
-		} else if inode.inodeCore.IsRegular() {
-			inode.regularBtree = &RegularBtree{}
-			if err := binary.Read(r, binary.BigEndian, &inode.regularBtree.bmbrBlock); err != nil {
-				return nil, xerrors.Errorf("failed to read regular bmbr block: %w", err)
-			}
-			for i := uint16(0); i < inode.regularBtree.bmbrBlock.Numrecs; i++ {
-				key := BmbtKey{}
-				if err := binary.Read(r, binary.BigEndian, &key); err != nil {
-					return nil, xerrors.Errorf("failed to read regular bmbt key: %w", err)
-				}
-				inode.regularBtree.keys = append(inode.regularBtree.keys, key)
-			}
-
-			tailKeysCount := BmbrMaxRecs(xfs.DataForkSize(inode.inodeCore.Forkoff)) - int(inode.regularBtree.bmbrBlock.Numrecs)
-			tailBuf := make([]byte, 8*tailKeysCount)
-			n, err := r.Read(tailBuf)
-			if err != nil {
-				return nil, xerrors.Errorf("failed to read tail key buf: %w", err)
-			}
-			if n != len(tailBuf) {
-				return nil, xerrors.Errorf("failed to read tail buf length actual (%d), expected (%d)", n, len(tailBuf))
-			}
-
-			for i := uint16(0); i < inode.regularBtree.bmbrBlock.Numrecs; i++ {
-				var ptr BmbtPtr
-				if err := binary.Read(r, binary.BigEndian, &ptr); err != nil {
-					return nil, xerrors.Errorf("failed to read regular bmbt key: %w", err)
-				}
-				inode.regularBtree.ptrs = append(inode.regularBtree.ptrs, ptr)
-			}
-		} else {
-			log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS")
+		inode, err = xfs.inodeFormatBtree(r, inode)
+		if err != nil {
+			return nil, xerrors.Errorf("parse inode format btree: %w", err)
 		}
 	case XFS_DINODE_FMT_UUID:
 		log.Logger.Warn("not support XFS_DINODE_FMT_UUID")
@@ -385,7 +509,40 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	return &inode, nil
 }
 
-func (xfs *FileSystem) parseBtreeBlock(blockNumber int64) (*BtreeBlock, error) {
+func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, error) {
+	btreeBlock := &BtreeBlock{}
+	if err := binary.Read(r, binary.BigEndian, btreeBlock); err != nil {
+		return nil, xerrors.Errorf("failed to read b+tree block: %w", err)
+	}
+	if btreeBlock.Magic != XFS_BMAP_CRC_MAGIC {
+		return nil, xerrors.Errorf("unsupported block header: (%d), expected BMAP_CRC_MAGIC", btreeBlock.Magic)
+	}
+	return btreeBlock, nil
+}
+
+func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey, []BmbtPtr, error) {
+	_, err := xfs.seekBlock(blockNumber)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("failed to seek block: %w", err)
+	}
+	b, err := xfs.readBlock(1)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("failed to read block: %w", err)
+	}
+	r := bytes.NewReader(b)
+	btreeBlock, err := xfs.parseBtreeBlock(r)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("parse btree node (offset: %d) error: %w", blockNumber, err)
+	}
+
+	keys, ptrs, err := xfs.parseBmbtKeyPtr(r, inode, btreeBlock.Numrecs)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("parse bmbr key-ptr error: %w", err)
+	}
+	return keys, ptrs, nil
+}
+
+func (xfs *FileSystem) parseBtreeLeafNode(blockNumber int64) ([]BmbtRec, error) {
 	_, err := xfs.seekBlock(blockNumber)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to seek block: %w", err)
@@ -394,13 +551,11 @@ func (xfs *FileSystem) parseBtreeBlock(blockNumber int64) (*BtreeBlock, error) {
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block: %w", err)
 	}
+
 	r := bytes.NewReader(b)
-	btreeBlock := &BtreeBlock{}
-	if err := binary.Read(r, binary.BigEndian, btreeBlock); err != nil {
-		return nil, xerrors.Errorf("failed to read b+tree block: %w", err)
-	}
-	if btreeBlock.Magic != XFS_BMAP_CRC_MAGIC {
-		return nil, xerrors.Errorf("unsupported block header: (%d), expected BMAP_CRC_MAGIC", btreeBlock.Magic)
+	btreeBlock, err := xfs.parseBtreeBlock(r)
+	if err != nil {
+		return nil, xerrors.Errorf("parse btree node (offset: %d) error: %w", blockNumber, err)
 	}
 
 	if btreeBlock.Level > 1 {
@@ -415,7 +570,7 @@ func (xfs *FileSystem) parseBtreeBlock(blockNumber int64) (*BtreeBlock, error) {
 		}
 		recs = append(recs, bmbtRec)
 	}
-	return btreeBlock, nil
+	return recs, nil
 }
 
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L316
@@ -499,6 +654,7 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 		if err := binary.Read(r, binary.BigEndian, &entry.Namelen); err != nil {
 			return nil, xerrors.Errorf("failed to read name length: %w", err)
 		}
+
 		// Parse Name
 		nameBuf := make([]byte, entry.Namelen)
 		n, err := r.Read(nameBuf)

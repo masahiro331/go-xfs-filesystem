@@ -103,27 +103,28 @@ func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 
 func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 	var buf []byte
+	var recs []BmbtRec
 	if inode.regularExtent != nil {
-		for _, rec := range inode.regularExtent.bmbtRecs {
-			p := rec.Unpack()
-			physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
-			_, err := xfs.seekBlock(physicalBlockOffset)
-			if err != nil {
-				return nil, xerrors.Errorf("failed to seek block: %w", err)
-			}
-			b, err := xfs.readBlock(uint32(p.BlockCount))
-			if err != nil {
-				return nil, xerrors.Errorf("failed to read block: %w", err)
-			}
-
-			buf = append(buf, b...)
-		}
+		recs = inode.regularExtent.bmbtRecs
+	} else if inode.regularBtree != nil {
+		recs = inode.regularBtree.bmbtRecs
+	} else {
+		return nil, xerrors.Errorf("unsupported inode: %+v", inode)
 	}
 
-	// TODO: implement regular b+tree extent.
-	// Ref. XFS specification [17.2] B+tree Extent List
-	if inode.regularBtree != nil {
-		return make([]byte, inode.inodeCore.Size), nil
+	for _, rec := range recs {
+		p := rec.Unpack()
+		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
+		_, err := xfs.seekBlock(physicalBlockOffset)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to seek block: %w", err)
+		}
+		b, err := xfs.readBlock(uint32(p.BlockCount))
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read block: %w", err)
+		}
+
+		buf = append(buf, b...)
 	}
 
 	if uint64(len(buf)) < inode.inodeCore.Size {
@@ -188,11 +189,13 @@ func (xfs *FileSystem) getRootInode() (*Inode, error) {
 
 // TODO: support ReadFile Interface
 func (xfs *FileSystem) ReadFile(name string) ([]byte, error) {
+	panic("implement me")
 	return []byte{}, nil
 }
 
 // TODO: support GlobFS Interface
 func (xfs *FileSystem) Glob(pattern string) ([]string, error) {
+	panic("implement me")
 	return []string{}, nil
 }
 
