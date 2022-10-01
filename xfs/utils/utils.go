@@ -17,11 +17,11 @@ func ReadBlock(r io.Reader) ([]byte, error) {
 	for i := 0; i < BlockSize/SectorSize; i++ {
 		b := make([]byte, SectorSize)
 		i, err := r.Read(b)
-		if i != 512 {
-			return nil, fmt.Errorf("failed to read sector invalid size expected(%d), actual(%d)", SectorSize, i)
-		}
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read: %w", err)
+		}
+		if i != 512 {
+			return nil, fmt.Errorf("failed to read sector invalid size expected(%d), actual(%d)", SectorSize, i)
 		}
 		buf = append(buf, b...)
 	}
