@@ -90,7 +90,7 @@ func (sb SuperBlock) BlockToAgNumber(n uint64) uint64 {
 }
 
 func (sb SuperBlock) BlockToAgBlockNumber(n uint64) uint64 {
-	return n & Mask64Lo(int(sb.Agblklog))
+	return n & Mask64Lo(int64(sb.Agblklog))
 }
 
 func (sb SuperBlock) BlockToPhysicalOffset(n uint64) int64 {

@@ -3,6 +3,7 @@ package xfs
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"io"
 	"unsafe"
 
@@ -365,8 +366,20 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16)
 		keys = append(keys, key)
 	}
 
+	if inode.inodeCore.Aformat != 1 && inode.inodeCore.Forkoff != 0 {
+		return nil, nil, xerrors.Errorf("unsupported attribute fork error")
+	}
+
 	// read memory align
-	tailKeysCount := BmbrMaxRecs(xfs.DataForkSize(inode.inodeCore.Forkoff)) - int(numrecs)
+	// TODO: check please this calculation
+	var tailKeysCount int
+	if inode.inodeCore.Forkoff == 0 {
+		// 20 is default value of key/pointer length
+		tailKeysCount = 20 - int(numrecs)
+	} else {
+		// (Forkoff - padding / 2(key/pointers)) - numrecs
+		tailKeysCount = int((inode.inodeCore.Forkoff-1)/2) - int(numrecs)
+	}
 	tailBuf := make([]byte, 8*tailKeysCount)
 	n, err := r.Read(tailBuf)
 	if err != nil {
@@ -480,16 +493,19 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	case XFS_DINODE_FMT_LOCAL:
 		inode, err = xfs.inodeFormatLocal(r, inode)
 		if err != nil {
+			log.Logger.Debug("\n", hex.Dump(buf))
 			return nil, xerrors.Errorf("parse inode format local: %w", err)
 		}
 	case XFS_DINODE_FMT_EXTENTS:
 		inode, err = xfs.inodeFormatExtents(r, inode)
 		if err != nil {
+			log.Logger.Debug("\n", hex.Dump(buf))
 			return nil, xerrors.Errorf("parse inode format extents: %w", err)
 		}
 	case XFS_DINODE_FMT_BTREE:
 		inode, err = xfs.inodeFormatBtree(r, inode)
 		if err != nil {
+			log.Logger.Debug("\n", hex.Dump(buf))
 			return nil, xerrors.Errorf("parse inode format btree: %w", err)
 		}
 	case XFS_DINODE_FMT_UUID:
@@ -521,7 +537,8 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, error) {
 }
 
 func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey, []BmbtPtr, error) {
-	_, err := xfs.seekBlock(blockNumber)
+	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
+	_, err := xfs.seekBlock(physicalBlockOffset)
 	if err != nil {
 		return nil, nil, xerrors.Errorf("failed to seek block: %w", err)
 	}
@@ -529,6 +546,7 @@ func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey
 	if err != nil {
 		return nil, nil, xerrors.Errorf("failed to read block: %w", err)
 	}
+
 	r := bytes.NewReader(b)
 	btreeBlock, err := xfs.parseBtreeBlock(r)
 	if err != nil {
@@ -543,7 +561,8 @@ func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey
 }
 
 func (xfs *FileSystem) parseBtreeLeafNode(blockNumber int64) ([]BmbtRec, error) {
-	_, err := xfs.seekBlock(blockNumber)
+	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
+	_, err := xfs.seekBlock(physicalBlockOffset)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to seek block: %w", err)
 	}
@@ -555,7 +574,7 @@ func (xfs *FileSystem) parseBtreeLeafNode(blockNumber int64) ([]BmbtRec, error) 
 	r := bytes.NewReader(b)
 	btreeBlock, err := xfs.parseBtreeBlock(r)
 	if err != nil {
-		return nil, xerrors.Errorf("parse btree node (offset: %d) error: %w", blockNumber, err)
+		return nil, xerrors.Errorf("parse btree node (offset: %d) error: %w", blockNumber*int64(xfs.PrimaryAG.SuperBlock.BlockSize), err)
 	}
 
 	if btreeBlock.Level > 1 {
@@ -795,11 +814,11 @@ func (b BmbtRec) Unpack() BmbtIrec {
 	return BmbtIrec{
 		StartOff:   (b.L0 & Mask64Lo(64-BMBT_EXNTFLAG_BITLEN)) >> 9,
 		StartBlock: ((b.L0 & Mask64Lo(9)) << 43) | (b.L1 >> 21),
-		BlockCount: (b.L1 & Mask64Lo(21)),
+		BlockCount: b.L1 & Mask64Lo(21),
 	}
 }
 
-func Mask64Lo(n int) uint64 {
+func Mask64Lo(n int64) uint64 {
 	return (1 << n) - 1
 }
 
