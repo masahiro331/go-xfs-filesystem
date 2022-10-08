@@ -101,7 +101,7 @@ func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	return f.Stat()
 }
 
-func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
+func (xfs *FileSystem) newFile(name string, inode *Inode) ([]byte, error) {
 	var buf []byte
 	var recs []BmbtRec
 	if inode.regularExtent != nil {
@@ -136,7 +136,7 @@ func (xfs *FileSystem) newFile(inode *Inode) ([]byte, error) {
 		// $ xfs_db Linux
 		// $ inode 12805824
 		// $ print
-		log.Logger.Warnf("failed to read inode(%v), fileSize miss match: actual(%d), expected(%d)", inode.inodeCore.Size, len(buf), inode.inodeCore.Size)
+		log.Logger.Warnf("failed to read (name: %s) inode(%d), fileSize miss match: actual(%d), expected(%d)", name, inode.inodeCore.Ino, len(buf), inode.inodeCore.Size)
 		return make([]byte, inode.inodeCore.Size), nil
 	}
 
@@ -229,7 +229,7 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 					return nil, ErrOpenSymlink
 				}
 
-				buf, err := xfs.newFile(dir.inode)
+				buf, err := xfs.newFile(name, dir.inode)
 				if err != nil {
 					return nil, xerrors.Errorf("failed to new file: %w", err)
 				}

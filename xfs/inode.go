@@ -309,6 +309,7 @@ func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, erro
 	} else if inode.inodeCore.IsSymlink() {
 		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS isSymlink")
 	} else {
+		log.Logger.Debugf("%+v\n", inode)
 		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS")
 	}
 
