@@ -2,7 +2,6 @@ package xfs
 
 import (
 	"bytes"
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 	"io"
 	"io/fs"
 	"path"
@@ -13,6 +12,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
+	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -101,46 +101,33 @@ func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	return f.Stat()
 }
 
-func (xfs *FileSystem) newFile(name string, inode *Inode) ([]byte, error) {
-	var buf []byte
+func (xfs *FileSystem) newFile(dirEntry dirEntry) (*File, error) {
 	var recs []BmbtRec
-	if inode.regularExtent != nil {
-		recs = inode.regularExtent.bmbtRecs
-	} else if inode.regularBtree != nil {
-		recs = inode.regularBtree.bmbtRecs
+	if dirEntry.inode.regularExtent != nil {
+		recs = dirEntry.inode.regularExtent.bmbtRecs
+	} else if dirEntry.inode.regularBtree != nil {
+		recs = dirEntry.inode.regularBtree.bmbtRecs
 	} else {
-		return nil, xerrors.Errorf("unsupported inode: %+v", inode)
+		return nil, xerrors.Errorf("unsupported inode: %+v", dirEntry.inode)
 	}
 
+	dt := make(dataTable)
 	for _, rec := range recs {
 		p := rec.Unpack()
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
-		_, err := xfs.seekBlock(physicalBlockOffset)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek block: %w", err)
+		for i := int64(0); i < int64(p.BlockCount); i++ {
+			dt[int64(p.StartOff)+i] = physicalBlockOffset + i
 		}
-		b, err := xfs.readBlock(uint32(p.BlockCount))
-		if err != nil {
-			return nil, xerrors.Errorf("failed to read block: %w", err)
-		}
-
-		buf = append(buf, b...)
 	}
 
-	if uint64(len(buf)) < inode.inodeCore.Size {
-		// TODO: FIXME
-		// This statement is unspecified error.
-		// #　How to reproduce
-		// $ oras pull ghcr.io/masahiro331/test-vm/ami.vmdk:latest
-		// $ 7z x ami.vmdk
-		// $ xfs_db Linux
-		// $ inode 12805824
-		// $ print
-		log.Logger.Warnf("failed to read (name: %s) inode(%d), fileSize miss match: actual(%d), expected(%d)", name, inode.inodeCore.Ino, len(buf), inode.inodeCore.Size)
-		return make([]byte, inode.inodeCore.Size), nil
-	}
-
-	return buf[:inode.inodeCore.Size], nil
+	return &File{
+		fs:           xfs,
+		FileInfo:     dirEntry.FileInfo,
+		buffer:       bytes.NewBuffer(nil),
+		blockSize:    int64(xfs.PrimaryAG.SuperBlock.BlockSize),
+		currentBlock: -1,
+		table:        dt,
+	}, nil
 }
 
 func (xfs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
@@ -229,16 +216,12 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 					return nil, ErrOpenSymlink
 				}
 
-				buf, err := xfs.newFile(name, dir.inode)
+				f, err := xfs.newFile(dir)
 				if err != nil {
 					return nil, xerrors.Errorf("failed to new file: %w", err)
 				}
 
-				return &File{
-					fs:       xfs,
-					FileInfo: dir.FileInfo,
-					buffer:   bytes.NewBuffer(buf),
-				}, nil
+				return f, nil
 			}
 		}
 	}
@@ -455,13 +438,58 @@ type File struct {
 	FileInfo
 
 	buffer *bytes.Buffer
+
+	blockSize    int64
+	currentBlock int64
+	table        dataTable
 }
+
+// map[offset]
+type dataTable map[int64]int64
 
 func (f *File) Stat() (fs.FileInfo, error) {
 	return &f.FileInfo, nil
 }
 
 func (f *File) Read(buf []byte) (int, error) {
+	if f.buffer.Len() == 0 {
+		f.currentBlock++
+		if f.currentBlock*f.blockSize >= f.Size() {
+			f.buffer = nil
+			return 0, io.EOF
+		}
+	} else {
+		return f.buffer.Read(buf)
+	}
+
+	offset, ok := f.table[f.currentBlock]
+	if !ok {
+		// blockSize: 512
+		// size: 2000
+		// 2000 - 512 * 3 = 464 < 512
+		if f.Size()-f.blockSize*f.currentBlock < f.blockSize {
+			f.buffer.Write(make([]byte, f.Size()-f.blockSize*f.currentBlock))
+		}
+		f.buffer.Write(make([]byte, f.blockSize))
+	} else {
+		_, err := f.fs.seekBlock(offset)
+		if err != nil {
+			return 0, xerrors.Errorf("failed to seek block: %w", err)
+		}
+		b, err := f.fs.readBlock(1)
+		if err != nil {
+			return 0, xerrors.Errorf("failed to read block: %w", err)
+		}
+
+		if f.Size()-f.blockSize*f.currentBlock < f.blockSize {
+			b = b[:f.Size()-f.blockSize*f.currentBlock]
+		}
+		n, err := f.buffer.Write(b)
+		if n != len(b) {
+			return 0, xerrors.Errorf("write buffer error: actual(%d), expected(%d)", n, len(b))
+		}
+	}
+
 	return f.buffer.Read(buf)
 }
 
