@@ -65,13 +65,13 @@ func NewFS(r io.SectionReader, cache Cache) (*FileSystem, error) {
 		cache:     cache,
 	}
 
-	AGSize := uint64(primaryAG.SuperBlock.Agblocks * primaryAG.SuperBlock.BlockSize)
-	for i := uint64(1); i < uint64(primaryAG.SuperBlock.Agcount); i++ {
+	AGSize := int64(primaryAG.SuperBlock.Agblocks) * int64(primaryAG.SuperBlock.BlockSize)
+	for i := int64(1); i < int64(primaryAG.SuperBlock.Agcount); i++ {
 		n, err := r.Seek(int64(AGSize*i), 0)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to seek file: %w", err)
 		}
-		if n != int64(AGSize*i) {
+		if n != AGSize*i {
 			return nil, xerrors.Errorf(ErrSeekOffsetFormat, n, AGSize*i)
 		}
 		ag, err := ParseAG(&r)
@@ -464,9 +464,6 @@ func (f *File) Read(buf []byte) (int, error) {
 
 	offset, ok := f.table[f.currentBlock]
 	if !ok {
-		// blockSize: 512
-		// size: 2000
-		// 2000 - 512 * 3 = 464 < 512
 		if f.Size()-f.blockSize*f.currentBlock < f.blockSize {
 			f.buffer.Write(make([]byte, f.Size()-f.blockSize*f.currentBlock))
 		}

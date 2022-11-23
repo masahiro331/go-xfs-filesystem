@@ -78,7 +78,7 @@ func (sb SuperBlock) InodeOffset(inodeNumber uint64) (int, uint64, uint64) {
 func (sb SuperBlock) InodeAbsOffset(inodeNumber uint64) uint64 {
 	agNumber, blockCount, inodeOffset := sb.InodeOffset(inodeNumber)
 
-	offset := (uint64(agNumber) * uint64(sb.Agblocks*sb.BlockSize)) +
+	offset := (uint64(agNumber) * uint64(sb.Agblocks) * uint64(sb.BlockSize)) +
 		(blockCount * uint64(sb.BlockSize)) +
 		inodeOffset*uint64(sb.Inodesize)
 
