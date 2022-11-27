@@ -310,7 +310,7 @@ func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, erro
 		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS isSymlink")
 	} else {
 		log.Logger.Debugf("%+v\n", inode)
-		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS")
+		log.Logger.Debug("not support XFS_DINODE_FMT_EXTENTS")
 	}
 
 	return inode, nil
@@ -514,7 +514,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	case XFS_DINODE_FMT_RMAP:
 		log.Logger.Warn("not support XFS_DINODE_FMT_RMAP")
 	default:
-		log.Logger.Warn("not support")
+		log.Logger.Warnf("not support inode format(%d)", inode.inodeCore.Format)
 	}
 
 	// TODO: support extend attribute fork , see. Chapter 19 Extended Attributes
