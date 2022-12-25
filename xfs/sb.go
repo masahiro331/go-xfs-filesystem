@@ -64,7 +64,7 @@ type SuperBlock struct {
 // return (AG number), (Inode Block), (Inode Offset)
 func (sb SuperBlock) InodeOffset(inodeNumber uint64) (int, uint64, uint64) {
 	offsetAddress := sb.Inopblog + sb.Agblklog
-	lowMask := (1<<(offsetAddress) - 1)
+	lowMask := 1<<(offsetAddress) - 1
 	AGNumber := inodeNumber >> uint32(offsetAddress)
 
 	relativeInodeNumber := inodeNumber & uint64(lowMask)

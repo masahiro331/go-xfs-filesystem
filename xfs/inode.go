@@ -367,6 +367,10 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16)
 		keys = append(keys, key)
 	}
 
+	// Aformat is type of attribute fork
+	// 1: local
+	// 2: extents
+	// 3. btree
 	if inode.inodeCore.Aformat != 1 && inode.inodeCore.Forkoff != 0 {
 		return nil, nil, xerrors.Errorf("unsupported attribute fork error")
 	}

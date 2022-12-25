@@ -38,7 +38,7 @@ type FileSystem struct {
 	PrimaryAG AG
 	AGs       []AG
 
-	cache Cache
+	cache Cache[string, any]
 }
 
 func Check(r io.Reader) bool {
@@ -49,14 +49,14 @@ func Check(r io.Reader) bool {
 	return true
 }
 
-func NewFS(r io.SectionReader, cache Cache) (*FileSystem, error) {
+func NewFS(r io.SectionReader, cache Cache[string, any]) (*FileSystem, error) {
 	primaryAG, err := ParseAG(&r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", err)
 	}
 
 	if cache == nil {
-		cache = &mockCache{}
+		cache = &mockCache[string, any]{}
 	}
 	fileSystem := FileSystem{
 		r:         &r,
@@ -67,7 +67,7 @@ func NewFS(r io.SectionReader, cache Cache) (*FileSystem, error) {
 
 	AGSize := int64(primaryAG.SuperBlock.Agblocks) * int64(primaryAG.SuperBlock.BlockSize)
 	for i := int64(1); i < int64(primaryAG.SuperBlock.Agcount); i++ {
-		n, err := r.Seek(int64(AGSize*i), 0)
+		n, err := r.Seek(AGSize*i, 0)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to seek file: %w", err)
 		}

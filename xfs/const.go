@@ -49,6 +49,17 @@ const (
 )
 
 const (
+	XFS_SB_VERSION2_RESERVED1BIT   = 0x00000001
+	XFS_SB_VERSION2_LAZYSBCOUNTBIT = 0x00000002 /* Superblk counters */
+	XFS_SB_VERSION2_RESERVED4BIT   = 0x00000004
+	XFS_SB_VERSION2_ATTR2BIT       = 0x00000008 /* Inline attr rework */
+	XFS_SB_VERSION2_PARENTBIT      = 0x00000010 /* parent pointers */
+	XFS_SB_VERSION2_PROJID32BIT    = 0x00000080 /* 32 bit project id */
+	XFS_SB_VERSION2_CRCBIT         = 0x00000100 /* metadata CRCs */
+	XFS_SB_VERSION2_FTYPE          = 0x00000200 /* inode type in dir */
+)
+
+const (
 	XFS_DIR2_DATA_SPACE int64 = iota
 	XFS_DIR2_LEAF_SPACE
 	XFS_DIR2_FREE_SPACE
