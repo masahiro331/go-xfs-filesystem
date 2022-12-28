@@ -50,8 +50,8 @@ func Check(r io.Reader) bool {
 	return true
 }
 
-func NewFS(r io.SectionReader, cache Cache[string, any]) (*FileSystem, error) {
-	primaryAG, err := ParseAG(&r)
+func NewFS(r io.ReaderAt, cache Cache[string, any]) (*FileSystem, error) {
+	primaryAG, err := ParseAG(r, 0)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", err)
 	}
@@ -60,7 +60,7 @@ func NewFS(r io.SectionReader, cache Cache[string, any]) (*FileSystem, error) {
 		cache = &mockCache[string, any]{}
 	}
 	fileSystem := FileSystem{
-		r:         &r,
+		r:         r,
 		PrimaryAG: *primaryAG,
 		AGs:       []AG{*primaryAG},
 		cache:     cache,
@@ -68,14 +68,7 @@ func NewFS(r io.SectionReader, cache Cache[string, any]) (*FileSystem, error) {
 
 	AGSize := int64(primaryAG.SuperBlock.Agblocks) * int64(primaryAG.SuperBlock.BlockSize)
 	for i := int64(1); i < int64(primaryAG.SuperBlock.Agcount); i++ {
-		n, err := r.Seek(AGSize*i, 0)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek file: %w", err)
-		}
-		if n != AGSize*i {
-			return nil, xerrors.Errorf(ErrSeekOffsetFormat, n, AGSize*i)
-		}
-		ag, err := ParseAG(&r)
+		ag, err := ParseAG(r, AGSize*i)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse allocation group %d: %w", i, err)
 		}
