@@ -209,7 +209,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, xfs.wrapError(op, name, xerrors.Errorf("railed to read directory: %w", err))
 	}
-
 	for _, entry := range dirEntries {
 		if !entry.IsDir() && entry.Name() == fileName {
 			if dir, ok := entry.(dirEntry); ok {
@@ -237,7 +236,7 @@ func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if int64(off) != offset {
+	if int64(off) != utils.SectorSize {
 		return nil, xerrors.Errorf(ErrReadSizeFormat, off, offset)
 	}
 	return buf, nil
@@ -245,7 +244,7 @@ func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
 
 func (xfs *FileSystem) readBlockAt(n int64) ([]byte, error) {
 
-	buf := make([]byte, 4096)
+	var buf []byte
 	for i := 0; i < utils.BlockSize/utils.SectorSize; i++ {
 		offset := n*int64(xfs.PrimaryAG.SuperBlock.BlockSize) + int64(i*utils.SectorSize)
 		b := make([]byte, utils.SectorSize)
