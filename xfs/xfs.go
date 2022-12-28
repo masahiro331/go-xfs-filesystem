@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
 	"path"
@@ -34,7 +35,7 @@ var (
 
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {
-	r         *io.SectionReader
+	r         io.ReaderAt
 	PrimaryAG AG
 	AGs       []AG
 
@@ -228,39 +229,40 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	return nil, fs.ErrNotExist
 }
 
-func (xfs *FileSystem) seekInode(n uint64) (int64, error) {
+func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
 	offset := int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n))
-	off, err := xfs.r.Seek(offset, io.SeekStart)
+
+	buf := make([]byte, utils.SectorSize)
+	off, err := xfs.r.ReadAt(buf, offset)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if off != offset {
-		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
+	if int64(off) != offset {
+		return nil, xerrors.Errorf(ErrReadSizeFormat, off, offset)
 	}
-	return off, nil
+	return buf, nil
 }
 
-func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
-	offset := n * int64(xfs.PrimaryAG.SuperBlock.BlockSize)
-	off, err := xfs.r.Seek(offset, io.SeekStart)
-	if err != nil {
-		return 0, err
-	}
-	if off != offset {
-		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
-	}
-	return off, nil
-}
+func (xfs *FileSystem) readBlockAt(n int64) ([]byte, error) {
 
-func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
-	buf := make([]byte, 0, xfs.PrimaryAG.SuperBlock.BlockSize*count)
-	for i := uint32(0); i < count; i++ {
-		b, err := utils.ReadBlock(xfs.r)
+	buf := make([]byte, 4096)
+	for i := 0; i < utils.BlockSize/utils.SectorSize; i++ {
+		offset := n*int64(xfs.PrimaryAG.SuperBlock.BlockSize) + int64(i*utils.SectorSize)
+		b := make([]byte, utils.SectorSize)
+		i, err := xfs.r.ReadAt(b, offset)
 		if err != nil {
-			return nil, err
+			return nil, xerrors.Errorf("failed to read: %w", err)
+		}
+		if i != utils.SectorSize {
+			return nil, fmt.Errorf("failed to read sector invalid size expected(%d), actual(%d)", utils.SectorSize, i)
 		}
 		buf = append(buf, b...)
 	}
+
+	if len(buf) != utils.BlockSize {
+		return nil, fmt.Errorf("block size error, expected(%d), actual(%d)", utils.BlockSize, len(buf))
+	}
+
 	return buf, nil
 }
 
@@ -469,11 +471,7 @@ func (f *File) Read(buf []byte) (int, error) {
 		}
 		f.buffer.Write(make([]byte, f.blockSize))
 	} else {
-		_, err := f.fs.seekBlock(offset)
-		if err != nil {
-			return 0, xerrors.Errorf("failed to seek block: %w", err)
-		}
-		b, err := f.fs.readBlock(1)
+		b, err := f.fs.readBlockAt(offset)
 		if err != nil {
 			return 0, xerrors.Errorf("failed to read block: %w", err)
 		}
