@@ -152,7 +152,7 @@ func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
 			mode:  fs.FileMode(inode.inodeCore.Mode),
 		}, nil
 	}
-	name = strings.TrimRight(name, string(filepath.Separator))
+	name = strings.TrimRight(name, "/")
 
 	dirs, dir := path.Split(name)
 	dirEntries, err := xfs.readDirEntry(dirs)
@@ -160,7 +160,7 @@ func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
 		return nil, xerrors.Errorf("failed to read dir entry: %w", err)
 	}
 	for _, entry := range dirEntries {
-		if entry.Name() == strings.Trim(dir, string(filepath.Separator)) {
+		if entry.Name() == strings.Trim(dir, "/") {
 			return entry.Info()
 		}
 	}
@@ -276,7 +276,7 @@ func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 	}
 
 	currentInode := inode
-	dirs := strings.Split(strings.Trim(filepath.Clean(name), string(filepath.Separator)), string(filepath.Separator))
+	dirs := strings.Split(strings.Trim(filepath.Clean(name), "/"), "/")
 	for i, dir := range dirs {
 		found := false
 		for _, fileInfo := range fileInfos {
