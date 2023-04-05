@@ -10,7 +10,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -469,14 +468,9 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		}
 	}
 
-	_, err := xfs.seekInode(ino)
+	buf, err := xfs.readInode(ino)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to seek inode: %w", err)
-	}
-
-	buf, err := utils.ReadSector(xfs.r)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to read sector: %w", err)
+		return nil, xerrors.Errorf("failed to read inode: %w", err)
 	}
 	r := bytes.NewReader(buf)
 
@@ -543,11 +537,7 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, error) {
 
 func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey, []BmbtPtr, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-	b, err := xfs.readBlock(1)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, nil, xerrors.Errorf("failed to read block: %w", err)
 	}
@@ -567,11 +557,7 @@ func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey
 
 func (xfs *FileSystem) parseBtreeLeafNode(blockNumber int64) ([]BmbtRec, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-	b, err := xfs.readBlock(1)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block: %w", err)
 	}
@@ -726,13 +712,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	}
 
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(bmbtIrec.StartBlock)
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-
-	// TODO: add tests, If Block count greater than 2
-	b, err := utils.ReadBlock(xfs.r)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block: %w", err)
 	}

@@ -125,17 +125,21 @@ func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	return sb, nil
 }
 
-func ParseAG(reader io.Reader) (*AG, error) {
-	r := io.LimitReader(reader, int64(utils.BlockSize))
-
+func ParseAG(reader io.ReaderAt, offset int64) (*AG, error) {
 	var ag AG
 	var err error
+	buf, err := utils.ReadBlockAt(reader, offset)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read super block", err)
+	}
+
+	r := bytes.NewReader(buf)
 	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse super block: %w", err)
 	}
 
-	buf, err := utils.ReadSector(r)
+	buf, err = utils.ReadSector(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create afg reader: %w", err)
 	}
