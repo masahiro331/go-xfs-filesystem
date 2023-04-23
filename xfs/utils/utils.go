@@ -19,6 +19,26 @@ func DefaultChunkReader() *chunkReader {
 	}
 }
 
+var allowedSectorSize = []int{512, 4096}
+
+func NewChunkReader(sectorSize int) (*chunkReader, error) {
+	validSectorSize := false
+	for _, s := range allowedSectorSize {
+		if s == sectorSize {
+			validSectorSize = true
+			break
+		}
+	}
+	if !validSectorSize {
+		return nil, fmt.Errorf("failed to instantiate chunk reader, invalid sector size: %d", sectorSize)
+	}
+
+	return &chunkReader{
+		blockSize:  BlockSize,
+		sectorSize: sectorSize,
+	}, nil
+}
+
 type chunkReader struct {
 	blockSize  int
 	sectorSize int
