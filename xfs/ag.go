@@ -136,7 +136,11 @@ func ParseAG(reader io.Reader) (*AG, error) {
 		return nil, xerrors.Errorf("failed to parse super block: %w", err)
 	}
 
-	chunkRedaer := utils.DefaultChunkReader()
+	chunkRedaer, err := utils.NewChunkReader(int(ag.SuperBlock.Sectsize))
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create chunk reader: %w", err)
+	}
+
 	buf, err := chunkRedaer.ReadSector(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create afg reader: %w", err)
