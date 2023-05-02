@@ -474,8 +474,11 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		return nil, xerrors.Errorf("failed to seek inode: %w", err)
 	}
 
-	chunkReader := utils.DefaultChunkReader()
-	buf, err := chunkReader.ReadSector(xfs.r)
+	sectorReader, err := utils.NewSectorReader(int(xfs.PrimaryAG.SuperBlock.Sectsize))
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create sector reader: %w", err)
+	}
+	buf, err := sectorReader.ReadSector(xfs.r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read sector: %w", err)
 	}
@@ -733,8 +736,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
 	}
 
 	// TODO: add tests, If Block count greater than 2
-	chunkReader := utils.DefaultChunkReader()
-	b, err := chunkReader.ReadBlock(xfs.r)
+	b, err := utils.ReadBlock(xfs.r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block: %w", err)
 	}

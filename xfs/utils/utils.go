@@ -12,16 +12,19 @@ const (
 	SectorSize = 512
 )
 
-func DefaultChunkReader() *chunkReader {
-	return &chunkReader{
-		blockSize:  BlockSize,
+type SectorReader interface {
+	ReadSector(r io.Reader) ([]byte, error)
+}
+
+func DefaultSectorReader() *sectorReader {
+	return &sectorReader{
 		sectorSize: SectorSize,
 	}
 }
 
 var allowedSectorSize = []int{512, 4096}
 
-func NewChunkReader(sectorSize int) (*chunkReader, error) {
+func NewSectorReader(sectorSize int) (*sectorReader, error) {
 	validSectorSize := false
 	for _, s := range allowedSectorSize {
 		if s == sectorSize {
@@ -33,46 +36,59 @@ func NewChunkReader(sectorSize int) (*chunkReader, error) {
 		return nil, fmt.Errorf("failed to instantiate chunk reader, invalid sector size: %d", sectorSize)
 	}
 
-	return &chunkReader{
-		blockSize:  BlockSize,
+	return &sectorReader{
 		sectorSize: sectorSize,
 	}, nil
 }
 
-type chunkReader struct {
-	blockSize  int
+type sectorReader struct {
 	sectorSize int
 }
 
-func (c chunkReader) ReadBlock(r io.Reader) ([]byte, error) {
-	buf := make([]byte, 0, c.blockSize)
-	for i := 0; i < c.blockSize/c.sectorSize; i++ {
-		b := make([]byte, c.sectorSize)
-		i, err := r.Read(b)
+func (c sectorReader) ReadSector(r io.Reader) ([]byte, error) {
+	buf := make([]byte, 0, c.sectorSize)
+	for i := 0; i < c.sectorSize/SectorSize; i++ {
+		b, err := readSector(r)
 		if err != nil {
-			return nil, xerrors.Errorf("failed to read: %w", err)
+			return nil, xerrors.Errorf("failed to read sector: %w", err)
 		}
-		if i != c.sectorSize {
-			return nil, fmt.Errorf("failed to read sector invalid size expected(%d), actual(%d)", c.sectorSize, i)
-		}
+
 		buf = append(buf, b...)
 	}
 
-	if len(buf) != c.blockSize {
-		return nil, fmt.Errorf("block size error, expected(%d), actual(%d)", c.blockSize, len(buf))
+	if len(buf) != c.sectorSize {
+		return nil, fmt.Errorf("sector size error, expected(%d), actual(%d)", c.sectorSize, len(buf))
 	}
 
 	return buf, nil
 }
 
-func (c chunkReader) ReadSector(r io.Reader) ([]byte, error) {
-	buf := make([]byte, c.sectorSize)
+func ReadBlock(r io.Reader) ([]byte, error) {
+	buf := make([]byte, 0, BlockSize)
+	for i := 0; i < BlockSize/SectorSize; i++ {
+		b, err := readSector(r)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read block: %w", err)
+		}
+
+		buf = append(buf, b...)
+	}
+
+	if len(buf) != BlockSize {
+		return nil, fmt.Errorf("block size error, expected(%d), actual(%d)", BlockSize, len(buf))
+	}
+
+	return buf, nil
+}
+
+func readSector(r io.Reader) ([]byte, error) {
+	buf := make([]byte, SectorSize)
 	i, err := r.Read(buf)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read: %w", err)
 	}
-	if i != c.sectorSize {
-		return nil, xerrors.Errorf("sector size error, read %d byte", i)
+	if i != SectorSize {
+		return nil, xerrors.Errorf("read size error, expected(%d), actual(%d)", SectorSize, i)
 	}
 
 	return buf, nil

@@ -112,8 +112,8 @@ type BtreeShortBlock struct {
 
 func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	var sb SuperBlock
-	chunkReader := utils.DefaultChunkReader()
-	buf, err := chunkReader.ReadSector(r)
+	sectorReader := utils.DefaultSectorReader()
+	buf, err := sectorReader.ReadSector(r)
 	if err != nil {
 		return SuperBlock{}, xerrors.Errorf("failed to create superblock reader: %w", err)
 	}
@@ -123,13 +123,24 @@ func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	if sb.Magicnum != XFS_SB_MAGIC {
 		return SuperBlock{}, xerrors.Errorf("failed to parse superblock magic byte error: %08x", sb.Magicnum)
 	}
+
+	if sb.Sectsize != utils.SectorSize {
+		completeSector := int(sb.Sectsize - utils.SectorSize)
+		buf := make([]byte, completeSector)
+		i, err := r.Read(buf)
+		if err != nil {
+			return SuperBlock{}, xerrors.Errorf("failed to read: %w", err)
+		}
+		if i != completeSector {
+			return SuperBlock{}, xerrors.Errorf("sector size error, read %d byte", i)
+		}
+	}
 	return sb, nil
 }
 
-func parseAGF(r io.Reader) (AGF, error) {
+func parseAGF(sectorReader utils.SectorReader, r io.Reader) (AGF, error) {
 	var agf AGF
-	chunkReader := utils.DefaultChunkReader()
-	buf, err := chunkReader.ReadSector(r)
+	buf, err := sectorReader.ReadSector(r)
 	if err != nil {
 		return AGF{}, xerrors.Errorf("failed to create agf reader: %w", err)
 	}
@@ -142,10 +153,9 @@ func parseAGF(r io.Reader) (AGF, error) {
 	return agf, nil
 }
 
-func parseAGI(r io.Reader) (AGI, error) {
+func parseAGI(sectorReader utils.SectorReader, r io.Reader) (AGI, error) {
 	var agi AGI
-	chunkReader := utils.DefaultChunkReader()
-	buf, err := chunkReader.ReadSector(r)
+	buf, err := sectorReader.ReadSector(r)
 	if err != nil {
 		return AGI{}, xerrors.Errorf("failed to create agi reader: %w", err)
 	}
@@ -158,10 +168,9 @@ func parseAGI(r io.Reader) (AGI, error) {
 	return agi, nil
 }
 
-func parseAGFL(r io.Reader) (AGFL, error) {
+func parseAGFL(sectorReader utils.SectorReader, r io.Reader) (AGFL, error) {
 	var agfl AGFL
-	chunkReader := utils.DefaultChunkReader()
-	buf, err := chunkReader.ReadSector(r)
+	buf, err := sectorReader.ReadSector(r)
 	if err != nil {
 		return AGFL{}, xerrors.Errorf("failed to create agfl reader: %w", err)
 	}
@@ -175,26 +184,34 @@ func parseAGFL(r io.Reader) (AGFL, error) {
 }
 
 func ParseAG(reader io.Reader) (*AG, error) {
-	r := io.LimitReader(reader, int64(utils.BlockSize))
-
+	var r io.Reader
 	var ag AG
 	var err error
+	r = io.LimitReader(reader, int64(utils.BlockSize))
 	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse super block: %w", err)
 	}
 
-	ag.Agf, err = parseAGF(r)
+	sectorReader, err := utils.NewSectorReader(int(ag.SuperBlock.Sectsize))
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create chunk reader: %w", err)
+	}
+
+	r = io.LimitReader(reader, int64(utils.BlockSize))
+	ag.Agf, err = parseAGF(sectorReader, r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse agf block: %w", err)
 	}
 
-	ag.Agi, err = parseAGI(r)
+	r = io.LimitReader(reader, int64(utils.BlockSize))
+	ag.Agi, err = parseAGI(sectorReader, r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse agi block: %w", err)
 	}
 
-	ag.Agfl, err = parseAGFL(r)
+	r = io.LimitReader(reader, int64(utils.BlockSize))
+	ag.Agfl, err = parseAGFL(sectorReader, r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse agfl block: %w", err)
 	}
