@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"unsafe"
 
@@ -722,41 +723,94 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 	}
 }
 
-func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
-	block := Dir2Block{}
-	// Skip Leaf and Free node
-	if int64(bmbtIrec.StartOff)*int64(xfs.PrimaryAG.SuperBlock.BlockSize) >= int64(XFS_DIR2_LEAF_OFFSET) {
-		return &block, nil
-	}
-
+func (xfs *FileSystem) parseDir2BlockHeader(bmbtIrec BmbtIrec) (io.Reader, *Dir3DataHdr, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(bmbtIrec.StartBlock)
 	_, err := xfs.seekBlock(physicalBlockOffset)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to seek block: %w", err)
+		return nil, nil, xerrors.Errorf("failed to seek block: %w", err)
 	}
 
 	// TODO: add tests, If Block count greater than 2
 	b, err := utils.ReadBlock(xfs.r)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to read block: %w", err)
+		return nil, nil, xerrors.Errorf("failed to read block: %w", err)
 	}
+
+	hdr := Dir3DataHdr{}
 	r := bytes.NewReader(b)
-	if err := binary.Read(r, binary.BigEndian, &block.Header); err != nil {
-		return nil, xerrors.Errorf("failed to parse block header error: %w", err)
+	if err := binary.Read(r, binary.BigEndian, &hdr); err != nil {
+		return nil, nil, xerrors.Errorf("failed to parse block header error: %w", err)
 	}
-	switch block.Header.Magic {
-	case XFS_DIR3_DATA_MAGIC:
-		block.Entries, err = xfs.parseXDD3Block(r)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to parse XDD3 block: %w", err)
+
+	return r, &hdr, nil
+}
+
+func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) (*Dir2Block, error) {
+	block := Dir2Block{}
+	/*
+		Skip Leaf and Free node.
+		The "leaf" block has a special offset defined by XFS_DIR2_LEAF_OFFSET. Currently, this is 32GB and in the extent view,
+		a block offset of 32GB / sb_blocksize. On a 4KB block filesystem, this is 0x800000 (8388608 decimal).
+	*/
+	if int64(bmbtIrec.StartOff)*int64(xfs.PrimaryAG.SuperBlock.BlockSize) >= int64(XFS_DIR2_LEAF_OFFSET) {
+		return &block, nil
+	}
+
+	r, hdr, err := xfs.parseDir2BlockHeader(bmbtIrec)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse block header: %w", err)
+	}
+
+	fmt.Println(bmbtIrec)
+	for i := 0; i < int(bmbtIrec.BlockCount); i++ {
+		switch hdr.Magic {
+		case XFS_DIR3_DATA_MAGIC:
+			r, header, err := xfs.parseDir2BlockHeader(bmbtIrec)
+			if err != nil {
+				return nil, xerrors.Errorf("failed to parse block header: %w", err)
+			}
+			block.Header = *header
+
+			// multi block directory
+			entries, err := xfs.parseXDD3Block(r)
+			if err != nil {
+				return nil, xerrors.Errorf("failed to parse XDD3 block: %w", err)
+			}
+			block.Entries = append(block.Entries, entries...)
+
+		case XFS_DIR3_BLOCK_MAGIC:
+			if i != 0 {
+				physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(bmbtIrec.StartBlock)
+				_, err := xfs.seekBlock(physicalBlockOffset)
+				if err != nil {
+					return nil, xerrors.Errorf("failed to seek block: %w", err)
+				}
+
+				// TODO: add tests, If Block count greater than 2
+				b, err := utils.ReadBlock(xfs.r)
+				if err != nil {
+					return nil, xerrors.Errorf("failed to read block: %w", err)
+				}
+				r = bytes.NewReader(b)
+			}
+
+			// single block directory
+			// FIXME: parse start offset.
+			entries, err := xfs.parseXDB3Block(r)
+			if err != nil {
+				return nil, xerrors.Errorf("failed to parse XDB3 block: %w", err)
+			}
+			block.Entries = append(block.Entries, entries...)
+
+		default:
+			return nil, xerrors.Errorf("failed to parse header error magic: %v: %w", block.Header.Magic, UnsupportedDir2BlockHeaderErr)
 		}
-	case XFS_DIR3_BLOCK_MAGIC:
-		block.Entries, err = xfs.parseXDB3Block(r)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to parse XDB3 block: %w", err)
-		}
-	default:
-		return nil, xerrors.Errorf("failed to parse header error magic: %v: %w", block.Header.Magic, UnsupportedDir2BlockHeaderErr)
+
+		bmbtIrec.StartOff++
+		bmbtIrec.StartBlock++
+	}
+	if hdr.Magic == XFS_DIR3_BLOCK_MAGIC {
+		fmt.Println(block.Entries)
 	}
 
 	return &block, nil

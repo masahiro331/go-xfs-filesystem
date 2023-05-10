@@ -363,24 +363,20 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 
 		for _, b := range inode.directoryExtents.bmbtRecs {
 			p := b.Unpack()
-			for i := 0; i < int(p.BlockCount); i++ {
-				block, err := xfs.parseDir2Block(p)
-				if err != nil {
-					if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
-						return nil, xerrors.Errorf("failed to parse dir2 block: %w", err)
-					}
-					log.Logger.Warn(err)
+			block, err := xfs.parseDir2Block(p)
+			if err != nil {
+				if !xerrors.Is(err, UnsupportedDir2BlockHeaderErr) {
+					return nil, xerrors.Errorf("failed to parse dir2 block: %w", err)
 				}
+				log.Logger.Warn(err)
+			}
 
-				if block == nil {
-					break
-				}
+			if block == nil {
+				break
+			}
 
-				for _, entry := range block.Entries {
-					entries = append(entries, entry)
-				}
-				p.StartBlock++
-				p.StartOff++
+			for _, entry := range block.Entries {
+				entries = append(entries, entry)
 			}
 		}
 	} else {
