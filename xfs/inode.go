@@ -474,7 +474,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		return nil, xerrors.Errorf("failed to seek inode: %w", err)
 	}
 
-	sectorReader, err := utils.NewSectorReader(int(xfs.PrimaryAG.SuperBlock.Sectsize))
+	sectorReader, err := utils.NewSectorReader(int(xfs.PrimaryAG.SuperBlock.Inodesize))
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create sector reader: %w", err)
 	}
