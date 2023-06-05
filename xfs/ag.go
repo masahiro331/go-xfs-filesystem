@@ -112,7 +112,8 @@ type BtreeShortBlock struct {
 
 func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	var sb SuperBlock
-	buf, err := utils.ReadSector(r)
+	sectorReader := utils.DefaultSectorReader()
+	buf, err := sectorReader.ReadSector(r)
 	if err != nil {
 		return SuperBlock{}, xerrors.Errorf("failed to create superblock reader: %w", err)
 	}
@@ -122,50 +123,97 @@ func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	if sb.Magicnum != XFS_SB_MAGIC {
 		return SuperBlock{}, xerrors.Errorf("failed to parse superblock magic byte error: %08x", sb.Magicnum)
 	}
+
+	if sb.Sectsize != utils.SectorSize {
+		completeSector := int(sb.Sectsize - utils.SectorSize)
+		buf := make([]byte, completeSector)
+		i, err := r.Read(buf)
+		if err != nil {
+			return SuperBlock{}, xerrors.Errorf("failed to read: %w", err)
+		}
+		if i != completeSector {
+			return SuperBlock{}, xerrors.Errorf("sector size error, read %d byte", i)
+		}
+	}
 	return sb, nil
 }
 
-func ParseAG(reader io.Reader) (*AG, error) {
-	r := io.LimitReader(reader, int64(utils.BlockSize))
+func parseAGF(sectorReader utils.SectorReader, r io.Reader) (AGF, error) {
+	var agf AGF
+	buf, err := sectorReader.ReadSector(r)
+	if err != nil {
+		return AGF{}, xerrors.Errorf("failed to create agf reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &agf); err != nil {
+		return AGF{}, xerrors.Errorf("failed to read agf: %w", err)
+	}
+	if agf.Magicnum != XFS_AGF_MAGIC {
+		return AGF{}, xerrors.Errorf("failed to parse agf magic byte error: %08x", agf.Magicnum)
+	}
+	return agf, nil
+}
 
+func parseAGI(sectorReader utils.SectorReader, r io.Reader) (AGI, error) {
+	var agi AGI
+	buf, err := sectorReader.ReadSector(r)
+	if err != nil {
+		return AGI{}, xerrors.Errorf("failed to create agi reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &agi); err != nil {
+		return AGI{}, xerrors.Errorf("failed to read agi: %w", err)
+	}
+	if agi.Magicnum != XFS_AGI_MAGIC {
+		return AGI{}, xerrors.Errorf("failed to parse agi magic byte error: %08x", agi.Magicnum)
+	}
+	return agi, nil
+}
+
+func parseAGFL(sectorReader utils.SectorReader, r io.Reader) (AGFL, error) {
+	var agfl AGFL
+	buf, err := sectorReader.ReadSector(r)
+	if err != nil {
+		return AGFL{}, xerrors.Errorf("failed to create agfl reader: %w", err)
+	}
+	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &agfl); err != nil {
+		return AGFL{}, xerrors.Errorf("failed to read agfl: %w", err)
+	}
+	if agfl.Magicnum != XFS_AGFL_MAGIC {
+		return AGFL{}, xerrors.Errorf("failed to parse agfl magic byte error: %08x", agfl.Magicnum)
+	}
+	return agfl, nil
+}
+
+func ParseAG(reader io.Reader) (*AG, error) {
+	var r io.Reader
 	var ag AG
 	var err error
+	r = io.LimitReader(reader, int64(utils.BlockSize))
 	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse super block: %w", err)
 	}
 
-	buf, err := utils.ReadSector(r)
+	sectorReader, err := utils.NewSectorReader(int(ag.SuperBlock.Sectsize))
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create afg reader: %w", err)
-	}
-	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agf); err != nil {
-		return nil, xerrors.Errorf("failed to read afg: %w", err)
-	}
-	if ag.Agf.Magicnum != XFS_AGF_MAGIC {
-		return nil, xerrors.Errorf("failed to parse agf magic byte error: %08x", ag.Agf.Magicnum)
+		return nil, xerrors.Errorf("failed to create chunk reader: %w", err)
 	}
 
-	buf, err = utils.ReadSector(r)
+	r = io.LimitReader(reader, int64(utils.BlockSize))
+	ag.Agf, err = parseAGF(sectorReader, r)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create agi reader: %w", err)
-	}
-	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agi); err != nil {
-		return nil, xerrors.Errorf("failed to read agi: %w", err)
-	}
-	if ag.Agi.Magicnum != XFS_AGI_MAGIC {
-		return nil, xerrors.Errorf("failed to parse agi magic byte error: %08x", ag.Agi.Magicnum)
+		return nil, xerrors.Errorf("failed to parse agf block: %w", err)
 	}
 
-	buf, err = utils.ReadSector(r)
+	r = io.LimitReader(reader, int64(utils.BlockSize))
+	ag.Agi, err = parseAGI(sectorReader, r)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create agfl reader: %w", err)
+		return nil, xerrors.Errorf("failed to parse agi block: %w", err)
 	}
-	if err := binary.Read(bytes.NewReader(buf), binary.BigEndian, &ag.Agfl); err != nil {
-		return nil, xerrors.Errorf("failed to read agfl: %w", err)
-	}
-	if ag.Agfl.Magicnum != XFS_AGFL_MAGIC {
-		return nil, xerrors.Errorf("failed to parse agfl magic byte error: %08x", ag.Agfl.Magicnum)
+
+	r = io.LimitReader(reader, int64(utils.BlockSize))
+	ag.Agfl, err = parseAGFL(sectorReader, r)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse agfl block: %w", err)
 	}
 
 	return &ag, nil
