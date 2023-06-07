@@ -11,7 +11,6 @@ import (
 
 	"golang.org/x/xerrors"
 
-	"github.com/masahiro331/go-xfs-filesystem/log"
 	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
@@ -342,6 +341,21 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 	return fileInfos, nil
 }
 
+func (xfs *FileSystem) parseTree(bmbtRecs []BmbtRec) ([]Entry, error) {
+	var entries []Entry
+	for _, b := range bmbtRecs {
+		p := b.Unpack()
+		blockEntries, err := xfs.parseDir2Block(p)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse dir2 block: %w", err)
+		}
+		for _, entry := range blockEntries {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
+}
+
 func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 	inode, err := xfs.ParseInode(ino)
 	if err != nil {
@@ -361,22 +375,19 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 		if len(inode.directoryExtents.bmbtRecs) == 0 {
 			return nil, xerrors.New("directory extents tree bmbtRecs is empty error")
 		}
-
-		for _, b := range inode.directoryExtents.bmbtRecs {
-			p := b.Unpack()
-			blockEntries, err := xfs.parseDir2Block(p)
-			if err != nil {
-				log.Logger.Warn(err)
-			}
-
-			if len(blockEntries) == 0 {
-				continue
-			}
-
-			for _, entry := range blockEntries {
-				entries = append(entries, entry)
-			}
+		entries, err = xfs.parseTree(inode.directoryExtents.bmbtRecs)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse extents tree: %w", err)
 		}
+	} else if inode.directoryBtree != nil {
+		if len(inode.directoryBtree.bmbtRecs) == 0 {
+			return nil, xerrors.New("directory extents btree bmbtRecs is empty error")
+		}
+		entries, err = xfs.parseTree(inode.directoryBtree.bmbtRecs)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse btree: %w", err)
+		}
+
 	} else {
 		return nil, xerrors.New("not found entries")
 	}

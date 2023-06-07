@@ -16,8 +16,6 @@ import (
 var (
 	InodeSupportVersion = 3
 
-	UnsupportedDir2BlockHeaderErr = xerrors.New("unsupported block")
-
 	XFS_DIR2_SPACE_SIZE  = int64(1) << (32 + XFS_DIR2_DATA_ALIGN_LOG)
 	XFS_DIR2_DATA_OFFSET = XFS_DIR2_DATA_SPACE * XFS_DIR2_SPACE_SIZE
 	XFS_DIR2_LEAF_OFFSET = XFS_DIR2_LEAF_SPACE * XFS_DIR2_SPACE_SIZE
@@ -35,10 +33,11 @@ type Inode struct {
 	// S_IFDIR
 	directoryLocal   *DirectoryLocal
 	directoryExtents *DirectoryExtents
+	directoryBtree   *Btree
 
 	// S_IFREG
 	regularExtent *RegularExtent
-	regularBtree  *RegularBtree
+	regularBtree  *Btree
 
 	// S_IFLNK
 	symlinkString *SymlinkString
@@ -48,13 +47,13 @@ type RegularExtent struct {
 	bmbtRecs []BmbtRec
 }
 
-type RegularBtree struct {
-	bmbrBlock BmbrBlock
-	bmbtRecs  []BmbtRec
-}
-
 type DirectoryExtents struct {
 	bmbtRecs []BmbtRec
+}
+
+type Btree struct {
+	bmbrBlock BmbrBlock
+	bmbtRecs  []BmbtRec
 }
 
 type DirectoryLocal struct {
@@ -424,16 +423,11 @@ func (xfs *FileSystem) parseBmbrBlock(r io.Reader, inode Inode) (*BmbrBlock, err
 }
 
 func (xfs *FileSystem) inodeFormatBtree(r io.Reader, inode Inode) (Inode, error) {
-	if !inode.inodeCore.IsRegular() {
-		log.Logger.Warnf("not support XFS_DINODE_FMT_BTREE type: %+v", inode)
-		return Inode{}, xerrors.Errorf("invalid inode")
-	}
-
 	bmbrBlock, err := xfs.parseBmbrBlock(r, inode)
 	if err != nil {
 		return Inode{}, xerrors.Errorf("parse bmbr block error: %w", err)
 	}
-	btree := &RegularBtree{
+	btree := &Btree{
 		bmbrBlock: *bmbrBlock,
 	}
 	if bmbrBlock.Level == 1 {
@@ -455,7 +449,13 @@ func (xfs *FileSystem) inodeFormatBtree(r io.Reader, inode Inode) (Inode, error)
 			return Inode{}, xerrors.Errorf("parse multi level btree error: %w", err)
 		}
 	}
-	inode.regularBtree = btree
+	if inode.inodeCore.IsRegular() {
+		inode.regularBtree = btree
+	}
+	if inode.inodeCore.IsDir() {
+		inode.directoryBtree = btree
+	}
+
 	return inode, nil
 }
 
