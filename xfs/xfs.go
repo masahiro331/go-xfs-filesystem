@@ -458,6 +458,9 @@ func (f *File) Stat() (fs.FileInfo, error) {
 }
 
 func (f *File) Read(buf []byte) (int, error) {
+	if f.buffer == nil {
+		return 0, io.EOF
+	}
 	if f.buffer.Len() == 0 {
 		f.currentBlock++
 		if f.currentBlock*f.blockSize >= f.Size() {
