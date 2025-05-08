@@ -148,7 +148,6 @@ func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
 		return FileInfo{
 			name:  "/",
 			inode: inode,
-			mode:  fs.FileMode(inode.inodeCore.Mode),
 		}, nil
 	}
 	name = strings.TrimRight(name, string(filepath.Separator))
@@ -334,7 +333,6 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 			FileInfo{
 				name:  entry.Name(),
 				inode: inode,
-				mode:  fs.FileMode(inode.inodeCore.Mode),
 			},
 		)
 	}
@@ -399,8 +397,6 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 type FileInfo struct {
 	name  string
 	inode *Inode
-
-	mode fs.FileMode
 }
 
 func (i FileInfo) IsDir() bool {
@@ -424,7 +420,42 @@ func (i FileInfo) Sys() interface{} {
 }
 
 func (i FileInfo) Mode() fs.FileMode {
-	return i.mode
+	m := i.inode.inodeCore.Mode
+	// Bottom 9 bits are same in fs.FileMode and XFS inode (unix permission bits)
+	translatedMode := fs.FileMode(m & 0o777)
+
+	// Bits 9-12 in the inode are sticky, setuid, and setgid bits
+	if m&0o1000 != 0 {
+		translatedMode |= fs.ModeSticky
+	}
+	if m&0o2000 != 0 {
+		translatedMode |= fs.ModeSetuid
+	}
+	if m&0o4000 != 0 {
+		translatedMode |= fs.ModeSetgid
+	}
+
+	// bits 13-16 are file type bits, defined in stat.h
+	switch m & 0xF000 {
+	case 0xC000:
+		translatedMode |= fs.ModeSocket
+	case 0xA000:
+		translatedMode |= fs.ModeSymlink
+	case 0x8000:
+		// Regular file, no flags to set
+	case 0x6000:
+		translatedMode |= fs.ModeDevice
+	case 0x4000:
+		translatedMode |= fs.ModeDir
+	case 0x2000:
+		translatedMode |= fs.ModeCharDevice
+	case 0x1000:
+		translatedMode |= fs.ModeNamedPipe
+	default:
+		translatedMode |= fs.ModeIrregular
+	}
+
+	return translatedMode
 }
 
 // dirEntry is implemented io/fs DirEntry interface

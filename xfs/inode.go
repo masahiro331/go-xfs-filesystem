@@ -834,19 +834,19 @@ func parseEntry(r io.Reader, i8count bool) (*Dir2SfEntry, error) {
 }
 
 func (ic InodeCore) IsDir() bool {
-	return ic.Mode&0x4000 != 0 && ic.Mode&0x8000 == 0
+	return ic.Mode&0xF000 == 0x4000
 }
 
 func (ic InodeCore) IsRegular() bool {
-	return ic.Mode&0x8000 != 0 && ic.Mode&0x4000 == 0
+	return ic.Mode&0xF000 == 0x8000
 }
 
 func (ic InodeCore) IsSocket() bool {
-	return ic.Mode&0xC000 != 0
+	return ic.Mode&0xF000 == 0xC000
 }
 
 func (ic InodeCore) IsSymlink() bool {
-	return ic.Mode&0xA000 != 0
+	return ic.Mode&0xF000 == 0xA000
 }
 
 func (ic InodeCore) isSupported() bool {

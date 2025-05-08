@@ -25,19 +25,19 @@ func TestFileSystemCheckFileExtents(t *testing.T) {
 			filesystem:   "testdata/image.xfs",
 			name:         "fmt_extents_file_1024",
 			expectedSize: 1024,
-			mode:         33188,
+			mode:         0o644,
 		},
 		{
 			filesystem:   "testdata/image.xfs",
 			name:         "fmt_extents_file_4096",
 			expectedSize: 4096,
-			mode:         33188,
+			mode:         0o644,
 		},
 		{
 			filesystem:   "testdata/image.xfs",
 			name:         "fmt_extents_file_16384",
 			expectedSize: 16384,
-			mode:         33188,
+			mode:         0o644,
 		},
 		{
 			filesystem:  "testdata/image.xfs",
