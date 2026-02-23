@@ -1,6 +1,7 @@
 package xfs
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -78,6 +79,62 @@ func TestDataForkSize(t *testing.T) {
 	}
 }
 
+func TestBmbrMaxRecsFromDataFork(t *testing.T) {
+	tests := []struct {
+		name            string
+		inodesize       uint16
+		forkoff         uint8
+		version         uint8
+		expectedMaxrecs int
+	}{
+		{
+			name:            "V3, 256-byte inode, forkoff=0",
+			inodesize:       256,
+			forkoff:         0,
+			version:         3,
+			expectedMaxrecs: (80 - 4) / 16, // DataForkSize=80, maxrecs=4
+		},
+		{
+			name:            "V3, 512-byte inode, forkoff=0",
+			inodesize:       512,
+			forkoff:         0,
+			version:         3,
+			expectedMaxrecs: (336 - 4) / 16, // DataForkSize=336, maxrecs=20
+		},
+		{
+			name:            "V2, 256-byte inode, forkoff=0",
+			inodesize:       256,
+			forkoff:         0,
+			version:         2,
+			expectedMaxrecs: (156 - 4) / 16, // DataForkSize=156, maxrecs=9
+		},
+		{
+			name:            "V3, forkoff=24",
+			inodesize:       256,
+			forkoff:         24,
+			version:         3,
+			expectedMaxrecs: (192 - 4) / 16, // DataForkSize=192, maxrecs=11
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := &FileSystem{
+				PrimaryAG: AG{
+					SuperBlock: SuperBlock{
+						Inodesize: tt.inodesize,
+					},
+				},
+			}
+			dataForkSize := fs.DataForkSize(tt.forkoff, tt.version)
+			maxrecs := (dataForkSize - 4) / 16
+			if maxrecs != tt.expectedMaxrecs {
+				t.Errorf("maxrecs = %d, want %d (DataForkSize=%d)", maxrecs, tt.expectedMaxrecs, dataForkSize)
+			}
+		})
+	}
+}
+
 func TestInodeCoreBaseSize(t *testing.T) {
 	size := binary.Size(InodeCoreBase{})
 	if size != INODE_CORE_BASE_SIZE {
@@ -111,6 +168,116 @@ func TestInodeCoreIsSupported(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("isSupported() version=%d: got %v, want %v", tt.version, got, tt.expected)
 		}
+	}
+}
+
+func TestParseInodeV2(t *testing.T) {
+	// Build a minimal 512-byte V2 inode binary (big-endian).
+	// Inodesize must be in allowedSectorSize (512 or 4096).
+	buf := make([]byte, 512)
+	// Magic = XFS_DINODE_MAGIC (0x494e)
+	buf[0] = 0x49
+	buf[1] = 0x4e
+	// Mode = regular file (0x8000) | 0644
+	buf[2] = 0x81
+	buf[3] = 0xa4
+	// Version = 2
+	buf[4] = 2
+	// Format = XFS_DINODE_FMT_EXTENTS
+	buf[5] = XFS_DINODE_FMT_EXTENTS
+	// OnLink = 1 (uint16 big-endian at offset 6)
+	buf[7] = 1
+	// NLink = 1 (uint32 big-endian at offset 16)
+	buf[19] = 1
+	// Nextents = 0 (uint32 at offset 76)
+	// Size = 0
+	// Everything else stays zero (valid for empty regular file)
+
+	f := bytes.NewReader(buf)
+	sr := io.NewSectionReader(f, 0, int64(len(buf)))
+
+	xfs := &FileSystem{
+		r: sr,
+		PrimaryAG: AG{
+			SuperBlock: SuperBlock{
+				Inodesize: 512,
+				Inopblock: 8,
+				Inopblog:  3,
+				Agblklog:  19,
+				Agblocks:  524288,
+				BlockSize: 4096,
+			},
+		},
+		cache: &mockCache[string, any]{},
+	}
+
+	inode, err := xfs.ParseInode(0)
+	if err != nil {
+		t.Fatalf("ParseInode V2 failed: %v", err)
+	}
+
+	if inode.inodeCore.Version != 2 {
+		t.Errorf("Version = %d, want 2", inode.inodeCore.Version)
+	}
+	// V2: Ino should be set from argument
+	if inode.inodeCore.Ino != 0 {
+		t.Errorf("Ino = %d, want 0", inode.inodeCore.Ino)
+	}
+	// V2: NLink should be read from the binary
+	if inode.inodeCore.NLink != 1 {
+		t.Errorf("NLink = %d, want 1", inode.inodeCore.NLink)
+	}
+	if !inode.inodeCore.IsRegular() {
+		t.Error("expected regular file")
+	}
+}
+
+func TestParseInodeV1OnLinkPromotion(t *testing.T) {
+	buf := make([]byte, 512)
+	// Magic
+	buf[0] = 0x49
+	buf[1] = 0x4e
+	// Mode = regular file (0x8000)
+	buf[2] = 0x80
+	buf[3] = 0x00
+	// Version = 1
+	buf[4] = 1
+	// Format = XFS_DINODE_FMT_EXTENTS
+	buf[5] = XFS_DINODE_FMT_EXTENTS
+	// OnLink = 5 (uint16 big-endian at offset 6)
+	buf[6] = 0
+	buf[7] = 5
+	// NLink = 0 (V1 doesn't use this field natively)
+
+	f := bytes.NewReader(buf)
+	sr := io.NewSectionReader(f, 0, int64(len(buf)))
+
+	xfs := &FileSystem{
+		r: sr,
+		PrimaryAG: AG{
+			SuperBlock: SuperBlock{
+				Inodesize: 512,
+				Inopblock: 8,
+				Inopblog:  3,
+				Agblklog:  19,
+				Agblocks:  524288,
+				BlockSize: 4096,
+			},
+		},
+		cache: &mockCache[string, any]{},
+	}
+
+	inode, err := xfs.ParseInode(0)
+	if err != nil {
+		t.Fatalf("ParseInode V1 failed: %v", err)
+	}
+
+	if inode.inodeCore.Version != 1 {
+		t.Errorf("Version = %d, want 1", inode.inodeCore.Version)
+	}
+	// V1: OnLink should be promoted to NLink
+	if inode.inodeCore.NLink != 5 {
+		t.Errorf("NLink = %d, want 5 (promoted from OnLink)", inode.inodeCore.NLink)
 	}
 }
 
