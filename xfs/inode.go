@@ -342,34 +342,32 @@ func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, erro
 	return inode, nil
 }
 
-func (xfs *FileSystem) walkBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr) (uint16, []BmbtKey, []BmbtPtr, error) {
+func (xfs *FileSystem) walkBtree(level uint16, ptrs []BmbtPtr) (uint16, []BmbtPtr, error) {
 	if level == 1 {
-		return level, keys, ptrs, nil
+		return level, ptrs, nil
 	}
 
-	var retKeys []BmbtKey
 	var retPtrs []BmbtPtr
 	for _, ptr := range ptrs {
-		nodeKeys, nodePtrs, err := xfs.parseBtreeNode(int64(ptr))
+		_, nodePtrs, err := xfs.parseBtreeNode(int64(ptr))
 		if err != nil {
-			return 0, nil, nil, xerrors.Errorf("parse btree node (ptr: %d) error: %w", ptr, err)
+			return 0, nil, xerrors.Errorf("parse btree node (ptr: %d) error: %w", ptr, err)
 		}
-		retKeys = append(retKeys, nodeKeys...)
 		retPtrs = append(retPtrs, nodePtrs...)
 	}
 	level--
-	return xfs.walkBtree(level, retKeys, retPtrs)
+	return xfs.walkBtree(level, retPtrs)
 }
 
-func (xfs *FileSystem) parseMultiLevelBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr) ([]BmbtRec, error) {
-	_, leafKeys, leafPtrs, err := xfs.walkBtree(level, keys, ptrs)
+func (xfs *FileSystem) parseMultiLevelBtree(level uint16, ptrs []BmbtPtr) ([]BmbtRec, error) {
+	_, leafPtrs, err := xfs.walkBtree(level, ptrs)
 	if err != nil {
 		return nil, xerrors.Errorf("walk Btree error: %w", err)
 	}
-	return xfs.parseSingleLevelBtree(leafKeys, leafPtrs)
+	return xfs.parseSingleLevelBtree(leafPtrs)
 }
 
-func (xfs *FileSystem) parseSingleLevelBtree(keys []BmbtKey, ptrs []BmbtPtr) ([]BmbtRec, error) {
+func (xfs *FileSystem) parseSingleLevelBtree(ptrs []BmbtPtr) ([]BmbtRec, error) {
 	var ret []BmbtRec
 	for _, ptr := range ptrs {
 		recs, err := xfs.parseBtreeLeafNode(int64(ptr))
@@ -450,7 +448,6 @@ func (xfs *FileSystem) inodeFormatBtree(r io.Reader, inode Inode) (Inode, error)
 	}
 	if bmbrBlock.Level == 1 {
 		btree.bmbtRecs, err = xfs.parseSingleLevelBtree(
-			bmbrBlock.keys,
 			bmbrBlock.ptrs,
 		)
 		if err != nil {
@@ -459,7 +456,6 @@ func (xfs *FileSystem) inodeFormatBtree(r io.Reader, inode Inode) (Inode, error)
 	} else if bmbrBlock.Level > 1 {
 		btree.bmbtRecs, err = xfs.parseMultiLevelBtree(
 			bmbrBlock.Level,
-			bmbrBlock.keys,
 			bmbrBlock.ptrs,
 		)
 		if err != nil {
