@@ -380,6 +380,28 @@ func TestParseBmbtKeyPtr_ValidParse(t *testing.T) {
 	}
 }
 
+func TestParseBmbtKeyPtr_NumrecsEqualsMaxrecs(t *testing.T) {
+	// numrecs == maxrecs: no tail padding to skip.
+	// Layout: keys[2] + ptrs[2], all slots populated.
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.BigEndian, BmbtKey(10))
+	binary.Write(&buf, binary.BigEndian, BmbtKey(20))
+	binary.Write(&buf, binary.BigEndian, BmbtPtr(100))
+	binary.Write(&buf, binary.BigEndian, BmbtPtr(200))
+
+	xfs := &FileSystem{}
+	keys, ptrs, err := xfs.parseBmbtKeyPtr(&buf, 2, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(keys) != 2 || keys[0] != 10 || keys[1] != 20 {
+		t.Errorf("keys = %v, want [10 20]", keys)
+	}
+	if len(ptrs) != 2 || ptrs[0] != 100 || ptrs[1] != 200 {
+		t.Errorf("ptrs = %v, want [100 200]", ptrs)
+	}
+}
+
 func TestAttributeOffset(t *testing.T) {
 	tests := []struct {
 		name     string

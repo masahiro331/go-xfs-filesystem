@@ -398,13 +398,15 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, numrecs uint16, maxrecs int)
 		return nil, nil, xerrors.Errorf("numrecs (%d) exceeds maxrecs (%d)", numrecs, maxrecs)
 	}
 	tailKeysCount := maxrecs - int(numrecs)
-	tailBuf := make([]byte, 8*tailKeysCount)
-	n, err := r.Read(tailBuf)
-	if err != nil {
-		return nil, nil, xerrors.Errorf("failed to read tail key buf: %w", err)
-	}
-	if n != len(tailBuf) {
-		return nil, nil, xerrors.Errorf("failed to read tail buf length actual (%d), expected (%d)", n, len(tailBuf))
+	if tailKeysCount > 0 {
+		tailBuf := make([]byte, 8*tailKeysCount)
+		n, err := r.Read(tailBuf)
+		if err != nil {
+			return nil, nil, xerrors.Errorf("failed to read tail key buf: %w", err)
+		}
+		if n != len(tailBuf) {
+			return nil, nil, xerrors.Errorf("failed to read tail buf length actual (%d), expected (%d)", n, len(tailBuf))
+		}
 	}
 
 	// parse bmbt ptr
