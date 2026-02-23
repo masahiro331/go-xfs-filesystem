@@ -88,7 +88,7 @@ func (xfs *FileSystem) Close() error {
 
 // parseTimestamp converts an XFS on-disk timestamp to time.Time.
 // XFS has two timestamp formats:
-// - Legacy: upper 32 bits = nanoseconds, lower 32 bits = seconds (signed, since Unix epoch)
+// - Legacy: lower 32 bits = seconds (signed, since Unix epoch), upper 32 bits = nanoseconds
 // - Bigtime: 64-bit nanoseconds since Dec 13, 1901 20:45:52 UTC
 //
 // NOTE: This must be used for all inode timestamp fields (Atime, Mtime, Ctime, Crtime)
