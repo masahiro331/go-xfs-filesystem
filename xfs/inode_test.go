@@ -58,6 +58,62 @@ func TestDataForkSize(t *testing.T) {
 	}
 }
 
+func TestInobtRec_SparseFields(t *testing.T) {
+	tests := []struct {
+		name         string
+		freecount    uint32
+		wantHolemask uint16
+		wantInoCount uint8
+		wantFreecnt  uint8
+	}{
+		{
+			name:         "all zeros",
+			freecount:    0x00000000,
+			wantHolemask: 0x0000,
+			wantInoCount: 0,
+			wantFreecnt:  0,
+		},
+		{
+			name:         "full chunk 64 inodes, 10 free",
+			freecount:    0x0000400A, // holemask=0, count=64, freecount=10
+			wantHolemask: 0x0000,
+			wantInoCount: 64,
+			wantFreecnt:  10,
+		},
+		{
+			name:         "sparse chunk with holes",
+			freecount:    0xFF002003, // holemask=0xFF00, count=32, freecount=3
+			wantHolemask: 0xFF00,
+			wantInoCount: 32,
+			wantFreecnt:  3,
+		},
+		{
+			name:         "all bits set",
+			freecount:    0xFFFFFFFF,
+			wantHolemask: 0xFFFF,
+			wantInoCount: 255,
+			wantFreecnt:  255,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := InobtRec{
+				Freecount: tt.freecount,
+			}
+			if got := rec.Holemask(); got != tt.wantHolemask {
+				t.Errorf("Holemask() = 0x%04X, want 0x%04X", got, tt.wantHolemask)
+			}
+			if got := rec.InoCount(); got != tt.wantInoCount {
+				t.Errorf("InoCount() = %d, want %d", got, tt.wantInoCount)
+			}
+			if got := rec.InoFreecount(); got != tt.wantFreecnt {
+				t.Errorf("InoFreecount() = %d, want %d", got, tt.wantFreecnt)
+			}
+		})
+	}
+}
+
 func TestParseInode(t *testing.T) {
 	testCases := []struct {
 		filesystem  string

@@ -158,6 +158,46 @@ func TestSuperBlock_InodeOffset(t *testing.T) {
 	}
 }
 
+func TestSuperBlock_HasSparseInodes(t *testing.T) {
+	tests := []struct {
+		name             string
+		featuresIncompat uint32
+		expected         bool
+	}{
+		{
+			name:             "sparse inodes enabled",
+			featuresIncompat: xfs.XFS_SB_FEAT_INCOMPAT_SPINODES,
+			expected:         true,
+		},
+		{
+			name:             "sparse inodes enabled with other flags",
+			featuresIncompat: xfs.XFS_SB_FEAT_INCOMPAT_FTYPE | xfs.XFS_SB_FEAT_INCOMPAT_SPINODES,
+			expected:         true,
+		},
+		{
+			name:             "sparse inodes not enabled",
+			featuresIncompat: xfs.XFS_SB_FEAT_INCOMPAT_FTYPE,
+			expected:         false,
+		},
+		{
+			name:             "no flags",
+			featuresIncompat: 0,
+			expected:         false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sb := xfs.SuperBlock{
+				FeaturesIncompat: tt.featuresIncompat,
+			}
+			got := sb.HasSparseInodes()
+			if got != tt.expected {
+				t.Errorf("HasSparseInodes() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSuperBlock_HasBigtime(t *testing.T) {
 	tests := []struct {
 		name             string

@@ -239,6 +239,22 @@ type InobtRec struct {
 	Free      uint64
 }
 
+// Holemask returns the sparse inode holemask from ir_holemask (bits 31:16 of Freecount).
+// Each bit represents 4 inodes; 1 = hole (no inode allocated).
+func (r InobtRec) Holemask() uint16 {
+	return uint16(r.Freecount >> 16)
+}
+
+// InoCount returns the number of valid inodes in this chunk (bits 15:8 of Freecount).
+func (r InobtRec) InoCount() uint8 {
+	return uint8(r.Freecount >> 8)
+}
+
+// InoFreecount returns the number of free inodes in this chunk (bits 7:0 of Freecount).
+func (r InobtRec) InoFreecount() uint8 {
+	return uint8(r.Freecount)
+}
+
 func (xfs *FileSystem) inodeFormatDevice(inode Inode) Inode {
 	inode.device = &Device{}
 	return inode

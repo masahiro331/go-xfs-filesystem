@@ -102,3 +102,8 @@ func (sb SuperBlock) BlockToPhysicalOffset(n uint64) int64 {
 func (sb SuperBlock) HasBigtime() bool {
 	return sb.FeaturesIncompat&XFS_SB_FEAT_INCOMPAT_BIGTIME != 0
 }
+
+// HasSparseInodes returns true if the filesystem has the sparse inode feature enabled.
+func (sb SuperBlock) HasSparseInodes() bool {
+	return sb.FeaturesIncompat&XFS_SB_FEAT_INCOMPAT_SPINODES != 0
+}
