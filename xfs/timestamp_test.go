@@ -19,14 +19,15 @@ func TestParseTimestamp(t *testing.T) {
 			expected: time.Unix(0, 0),
 		},
 		{
+			// xfs_timestamp_t: {t_sec=1000, t_nsec=500} → big-endian uint64: sec in upper, nsec in lower
 			name:     "legacy: known timestamp (sec=1000, nsec=500)",
-			ts:       uint64(500)<<32 | uint64(uint32(1000)),
+			ts:       uint64(uint32(1000))<<32 | uint64(500),
 			bigtime:  false,
 			expected: time.Unix(1000, 500),
 		},
 		{
 			name:     "legacy: negative seconds (sec=-1, nsec=0)",
-			ts:       uint64(uint32(0xFFFFFFFF)),
+			ts:       uint64(0xFFFFFFFF) << 32,
 			bigtime:  false,
 			expected: time.Unix(-1, 0),
 		},
