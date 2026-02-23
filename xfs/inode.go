@@ -396,6 +396,9 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, numrecs uint16, maxrecs int)
 	// Skip tail keys padding between keys[] and ptrs[] arrays.
 	// The on-disk layout is: keys[maxrecs] + ptrs[maxrecs], so we must skip
 	// (maxrecs - numrecs) unused key slots to reach the pointer array.
+	if int(numrecs) > maxrecs {
+		return nil, nil, xerrors.Errorf("numrecs (%d) exceeds maxrecs (%d)", numrecs, maxrecs)
+	}
 	tailKeysCount := maxrecs - int(numrecs)
 	tailBuf := make([]byte, 8*tailKeysCount)
 	n, err := r.Read(tailBuf)
