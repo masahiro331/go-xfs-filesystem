@@ -414,7 +414,7 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, numrecs uint16, maxrecs int)
 	for i := uint16(0); i < numrecs; i++ {
 		var ptr BmbtPtr
 		if err := binary.Read(r, binary.BigEndian, &ptr); err != nil {
-			return nil, nil, xerrors.Errorf("failed to read regular bmbt key: %w", err)
+			return nil, nil, xerrors.Errorf("failed to read regular bmbt ptr: %w", err)
 		}
 		ptrs = append(ptrs, ptr)
 	}
