@@ -337,6 +337,95 @@ func TestInobtRec_SparseFields(t *testing.T) {
 	}
 }
 
+func TestParseBmbtKeyPtr_NumrecsExceedsMaxrecs(t *testing.T) {
+	// Build a binary buffer with 2 keys (each 8 bytes big-endian).
+	// Set maxrecs=1 so numrecs(2) > maxrecs(1) triggers the validation error.
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.BigEndian, BmbtKey(100))
+	binary.Write(&buf, binary.BigEndian, BmbtKey(200))
+
+	xfs := &FileSystem{}
+	_, _, err := xfs.parseBmbtKeyPtr(&buf, 2, 1)
+	if err == nil {
+		t.Fatal("expected error when numrecs exceeds maxrecs, got nil")
+	}
+	if !strings.Contains(err.Error(), "numrecs (2) exceeds maxrecs (1)") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
+func TestParseBmbtKeyPtr_ValidParse(t *testing.T) {
+	// Build a valid buffer: maxrecs=2, numrecs=1
+	// Layout: keys[2] + ptrs[2], but only first slot of each is populated.
+	var buf bytes.Buffer
+	// key[0]
+	binary.Write(&buf, binary.BigEndian, BmbtKey(42))
+	// key[1] (tail padding — skipped by parseBmbtKeyPtr)
+	binary.Write(&buf, binary.BigEndian, BmbtKey(0))
+	// ptr[0]
+	binary.Write(&buf, binary.BigEndian, BmbtPtr(99))
+	// ptr[1] (unused)
+	binary.Write(&buf, binary.BigEndian, BmbtPtr(0))
+
+	xfs := &FileSystem{}
+	keys, ptrs, err := xfs.parseBmbtKeyPtr(&buf, 1, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(keys) != 1 || keys[0] != 42 {
+		t.Errorf("keys = %v, want [42]", keys)
+	}
+	if len(ptrs) != 1 || ptrs[0] != 99 {
+		t.Errorf("ptrs = %v, want [99]", ptrs)
+	}
+}
+
+func TestAttributeOffset(t *testing.T) {
+	tests := []struct {
+		name     string
+		version  uint8
+		forkoff  uint8
+		expected uint32
+	}{
+		{
+			name:     "V3, forkoff=0",
+			version:  3,
+			forkoff:  0,
+			expected: INODEV3_SIZE, // 176
+		},
+		{
+			name:     "V3, forkoff=24",
+			version:  3,
+			forkoff:  24,
+			expected: 24*8 + INODEV3_SIZE, // 368
+		},
+		{
+			name:     "V2, forkoff=0",
+			version:  2,
+			forkoff:  0,
+			expected: INODE_CORE_BASE_SIZE, // 100
+		},
+		{
+			name:     "V1, forkoff=10",
+			version:  1,
+			forkoff:  10,
+			expected: 10*8 + INODE_CORE_BASE_SIZE, // 180
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inode := &Inode{}
+			inode.inodeCore.Version = tt.version
+			inode.inodeCore.Forkoff = tt.forkoff
+			got := inode.AttributeOffset()
+			if got != tt.expected {
+				t.Errorf("AttributeOffset() = %d, want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestParseInode(t *testing.T) {
 	testCases := []struct {
 		filesystem  string
