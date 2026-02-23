@@ -455,10 +455,10 @@ func (i FileInfo) Mode() fs.FileMode {
 		translatedMode |= fs.ModeSticky
 	}
 	if m&0o2000 != 0 {
-		translatedMode |= fs.ModeSetuid
+		translatedMode |= fs.ModeSetgid
 	}
 	if m&0o4000 != 0 {
-		translatedMode |= fs.ModeSetgid
+		translatedMode |= fs.ModeSetuid
 	}
 
 	// bits 13-16 are file type bits, defined in stat.h

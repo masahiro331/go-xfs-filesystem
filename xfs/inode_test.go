@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
@@ -443,6 +444,82 @@ func TestAttributeOffset(t *testing.T) {
 			got := inode.AttributeOffset()
 			if got != tt.expected {
 				t.Errorf("AttributeOffset() = %d, want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFileInfoMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     uint16
+		expected fs.FileMode
+	}{
+		{
+			name:     "regular file 0644",
+			mode:     0x8000 | 0o644,
+			expected: 0o644,
+		},
+		{
+			name:     "directory 0755",
+			mode:     0x4000 | 0o755,
+			expected: fs.ModeDir | 0o755,
+		},
+		{
+			name:     "symlink 0777",
+			mode:     0xA000 | 0o777,
+			expected: fs.ModeSymlink | 0o777,
+		},
+		{
+			name:     "setuid (0o4000)",
+			mode:     0x8000 | 0o4755,
+			expected: fs.ModeSetuid | 0o755,
+		},
+		{
+			name:     "setgid (0o2000)",
+			mode:     0x8000 | 0o2755,
+			expected: fs.ModeSetgid | 0o755,
+		},
+		{
+			name:     "sticky (0o1000)",
+			mode:     0x4000 | 0o1777,
+			expected: fs.ModeDir | fs.ModeSticky | 0o777,
+		},
+		{
+			name:     "setuid + setgid + sticky",
+			mode:     0x8000 | 0o7755,
+			expected: fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky | 0o755,
+		},
+		{
+			name:     "socket",
+			mode:     0xC000 | 0o755,
+			expected: fs.ModeSocket | 0o755,
+		},
+		{
+			name:     "block device",
+			mode:     0x6000 | 0o660,
+			expected: fs.ModeDevice | 0o660,
+		},
+		{
+			name:     "char device",
+			mode:     0x2000 | 0o666,
+			expected: fs.ModeCharDevice | 0o666,
+		},
+		{
+			name:     "named pipe",
+			mode:     0x1000 | 0o644,
+			expected: fs.ModeNamedPipe | 0o644,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inode := &Inode{}
+			inode.inodeCore.Mode = tt.mode
+			fi := FileInfo{name: "test", inode: inode}
+			got := fi.Mode()
+			if got != tt.expected {
+				t.Errorf("Mode() = %v (0x%x), want %v (0x%x)", got, uint32(got), tt.expected, uint32(tt.expected))
 			}
 		})
 	}
