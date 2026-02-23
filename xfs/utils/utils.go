@@ -63,9 +63,13 @@ func (c sectorReader) ReadSector(r io.Reader) ([]byte, error) {
 	return buf, nil
 }
 
-func ReadBlock(r io.Reader) ([]byte, error) {
-	buf := make([]byte, 0, BlockSize)
-	for i := 0; i < BlockSize/SectorSize; i++ {
+func ReadBlockN(r io.Reader, blockSize int) ([]byte, error) {
+	if blockSize < SectorSize || blockSize%SectorSize != 0 {
+		return nil, fmt.Errorf("invalid block size: %d, must be a multiple of %d", blockSize, SectorSize)
+	}
+
+	buf := make([]byte, 0, blockSize)
+	for i := 0; i < blockSize/SectorSize; i++ {
 		b, err := readSector(r)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read block: %w", err)
@@ -74,11 +78,15 @@ func ReadBlock(r io.Reader) ([]byte, error) {
 		buf = append(buf, b...)
 	}
 
-	if len(buf) != BlockSize {
-		return nil, fmt.Errorf("block size error, expected(%d), actual(%d)", BlockSize, len(buf))
+	if len(buf) != blockSize {
+		return nil, fmt.Errorf("block size error, expected(%d), actual(%d)", blockSize, len(buf))
 	}
 
 	return buf, nil
+}
+
+func ReadBlock(r io.Reader) ([]byte, error) {
+	return ReadBlockN(r, BlockSize)
 }
 
 func readSector(r io.Reader) ([]byte, error) {

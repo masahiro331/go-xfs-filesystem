@@ -270,9 +270,10 @@ func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
 }
 
 func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
-	buf := make([]byte, 0, xfs.PrimaryAG.SuperBlock.BlockSize*count)
+	blockSize := int(xfs.PrimaryAG.SuperBlock.BlockSize)
+	buf := make([]byte, 0, blockSize*int(count))
 	for i := uint32(0); i < count; i++ {
-		b, err := utils.ReadBlock(xfs.r)
+		b, err := utils.ReadBlockN(xfs.r, blockSize)
 		if err != nil {
 			return nil, err
 		}

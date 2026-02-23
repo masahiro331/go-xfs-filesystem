@@ -733,7 +733,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 		if err != nil {
 			return nil, xerrors.Errorf("failed to seek block: %w", err)
 		}
-		blockData, err := utils.ReadBlock(xfs.r)
+		blockData, err := xfs.readBlock(1)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read block: %w", err)
 		}
@@ -778,7 +778,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 func (xfs *FileSystem) nextBlockIsLeader(blockOffset uint64) bool {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset + 1)
 	xfs.seekBlock(physicalBlockOffset)
-	blockData, _ := utils.ReadBlock(xfs.r)
+	blockData, _ := xfs.readBlock(1)
 
 	magic := binary.BigEndian.Uint32(blockData[:4])
 	return magic == XFS_DIR3_DATA_MAGIC || magic == XFS_DIR3_BLOCK_MAGIC
