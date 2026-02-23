@@ -646,7 +646,11 @@ func (xfs *FileSystem) DataForkSize(forkoff uint8, version uint8) int {
 }
 
 func (i *Inode) AttributeOffset() uint32 {
-	return uint32(i.inodeCore.Forkoff)*8 + INODEV3_SIZE
+	coreSize := uint32(INODEV3_SIZE)
+	if i.inodeCore.Version < 3 {
+		coreSize = uint32(INODE_CORE_BASE_SIZE)
+	}
+	return uint32(i.inodeCore.Forkoff)*8 + coreSize
 }
 
 // Parse XDB3block, XDB3 block is single block architecture
@@ -822,7 +826,10 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 func (xfs *FileSystem) nextBlockIsLeader(blockOffset uint64) bool {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset + 1)
 	xfs.seekBlock(physicalBlockOffset)
-	blockData, _ := xfs.readBlock(1)
+	blockData, err := xfs.readBlock(1)
+	if err != nil {
+		return false
+	}
 
 	magic := binary.BigEndian.Uint32(blockData[:4])
 	return magic == XFS_DIR3_DATA_MAGIC || magic == XFS_DIR3_BLOCK_MAGIC
