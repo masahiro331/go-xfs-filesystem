@@ -187,9 +187,11 @@ func ParseAG(reader io.Reader) (*AG, error) {
 	var r io.Reader
 	var ag AG
 	var err error
-	// Read the superblock. parseSuperBlock consumes exactly Sectsize bytes.
-	// AG headers (SB, AGF, AGI, AGFL) are sector-aligned, not block-aligned,
-	// so no additional skip is needed after reading the superblock.
+	// Use the default block size as the upper bound for the superblock read,
+	// because the actual block size is unknown until the superblock is parsed.
+	// AG headers (SB, AGF, AGI, AGFL) are sector-aligned, and parseSuperBlock
+	// consumes exactly Sectsize bytes, so the reader position after this call
+	// is at offset Sectsize — which is exactly where AGF begins.
 	r = io.LimitReader(reader, int64(utils.BlockSize))
 	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
