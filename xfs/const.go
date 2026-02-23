@@ -74,3 +74,19 @@ const (
 	XFS_DINODE_FMT_UUID
 	XFS_DINODE_FMT_RMAP
 )
+
+const (
+	// Superblock feature flags (FeaturesIncompat)
+	XFS_SB_FEAT_INCOMPAT_FTYPE       = 1 << 0
+	XFS_SB_FEAT_INCOMPAT_SPINODES    = 1 << 1
+	XFS_SB_FEAT_INCOMPAT_META_UUID   = 1 << 2
+	XFS_SB_FEAT_INCOMPAT_BIGTIME     = 1 << 3
+	XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR = 1 << 4
+)
+
+const (
+	// XFS_BIGTIME_EPOCH_OFFSET is the offset between the bigtime epoch (Dec 13, 1901)
+	// and the Unix epoch (Jan 1, 1970) in seconds.
+	// This equals 2^31 seconds.
+	XFS_BIGTIME_EPOCH_OFFSET = int64(1) << 31
+)

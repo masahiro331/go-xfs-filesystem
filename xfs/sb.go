@@ -96,3 +96,9 @@ func (sb SuperBlock) BlockToAgBlockNumber(n uint64) uint64 {
 func (sb SuperBlock) BlockToPhysicalOffset(n uint64) int64 {
 	return int64(sb.BlockToAgNumber(n)*uint64(sb.Agblocks) + sb.BlockToAgBlockNumber(n))
 }
+
+// HasBigtime returns true if the filesystem has the bigtime feature enabled.
+// Bigtime extends the timestamp range from 1901-2038 to 1901-2486.
+func (sb SuperBlock) HasBigtime() bool {
+	return sb.FeaturesIncompat&XFS_SB_FEAT_INCOMPAT_BIGTIME != 0
+}

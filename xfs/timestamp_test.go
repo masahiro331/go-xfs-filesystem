@@ -1,0 +1,55 @@
+package xfs
+
+import (
+	"testing"
+	"time"
+)
+
+func TestParseTimestamp(t *testing.T) {
+	tests := []struct {
+		name     string
+		ts       uint64
+		bigtime  bool
+		expected time.Time
+	}{
+		{
+			name:     "legacy: Unix epoch (sec=0, nsec=0)",
+			ts:       0,
+			bigtime:  false,
+			expected: time.Unix(0, 0),
+		},
+		{
+			name:     "legacy: known timestamp (sec=1000, nsec=500)",
+			ts:       uint64(500)<<32 | uint64(uint32(1000)),
+			bigtime:  false,
+			expected: time.Unix(1000, 500),
+		},
+		{
+			name:     "legacy: negative seconds (sec=-1, nsec=0)",
+			ts:       uint64(uint32(0xFFFFFFFF)),
+			bigtime:  false,
+			expected: time.Unix(-1, 0),
+		},
+		{
+			name:     "bigtime: epoch offset yields Unix epoch",
+			ts:       uint64(XFS_BIGTIME_EPOCH_OFFSET) * 1e9,
+			bigtime:  true,
+			expected: time.Unix(0, 0),
+		},
+		{
+			name:     "bigtime: known nanoseconds",
+			ts:       uint64(XFS_BIGTIME_EPOCH_OFFSET)*1e9 + 1000*1e9 + 500,
+			bigtime:  true,
+			expected: time.Unix(1000, 500),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTimestamp(tt.ts, tt.bigtime)
+			if !got.Equal(tt.expected) {
+				t.Errorf("parseTimestamp(%d, %v) = %v, want %v", tt.ts, tt.bigtime, got, tt.expected)
+			}
+		})
+	}
+}

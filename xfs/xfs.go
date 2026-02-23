@@ -86,6 +86,24 @@ func (xfs *FileSystem) Close() error {
 	return nil
 }
 
+// parseTimestamp converts an XFS on-disk timestamp to time.Time.
+// XFS has two timestamp formats:
+// - Legacy: upper 32 bits = nanoseconds, lower 32 bits = seconds (signed, since Unix epoch)
+// - Bigtime: 64-bit nanoseconds since Dec 13, 1901 20:45:52 UTC
+func parseTimestamp(ts uint64, bigtime bool) time.Time {
+	if bigtime {
+		// Bigtime format: 64-bit nanoseconds since bigtime epoch
+		sec := int64(ts/1e9) - XFS_BIGTIME_EPOCH_OFFSET
+		nsec := int64(ts % 1e9)
+		return time.Unix(sec, nsec)
+	}
+
+	// Legacy format: lower 32 bits = seconds (signed), upper 32 bits = nanoseconds
+	sec := int64(int32(ts & 0xFFFFFFFF))
+	nsec := int64(ts >> 32)
+	return time.Unix(sec, nsec)
+}
+
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	const op = "stat"
 
@@ -146,8 +164,9 @@ func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
 			return nil, xerrors.Errorf("failed to parse root inode: %w", err)
 		}
 		return FileInfo{
-			name:  "/",
-			inode: inode,
+			name:    "/",
+			inode:   inode,
+			bigtime: xfs.PrimaryAG.SuperBlock.HasBigtime(),
 		}, nil
 	}
 	name = strings.TrimRight(name, string(filepath.Separator))
@@ -331,8 +350,9 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 		// TODO: mode use inode.InodeCore.Mode
 		fileInfos = append(fileInfos,
 			FileInfo{
-				name:  entry.Name(),
-				inode: inode,
+				name:    entry.Name(),
+				inode:   inode,
+				bigtime: xfs.PrimaryAG.SuperBlock.HasBigtime(),
 			},
 		)
 	}
@@ -395,8 +415,9 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 
 // FileInfo is implemented io/fs FileInfo interface
 type FileInfo struct {
-	name  string
-	inode *Inode
+	name    string
+	inode   *Inode
+	bigtime bool
 }
 
 func (i FileInfo) IsDir() bool {
@@ -404,7 +425,7 @@ func (i FileInfo) IsDir() bool {
 }
 
 func (i FileInfo) ModTime() time.Time {
-	return time.Unix(int64(i.inode.inodeCore.Mtime), 0)
+	return parseTimestamp(i.inode.inodeCore.Mtime, i.bigtime)
 }
 
 func (i FileInfo) Size() int64 {
