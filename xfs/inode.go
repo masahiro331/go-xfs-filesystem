@@ -222,7 +222,7 @@ type InodeCoreBase struct {
 	NextUnlinked uint32
 }
 
-// InodeCoreV3Ext is the 80-byte V3 extension (CRC, timestamps, UUID, etc.).
+// InodeCoreV3Ext is the 76-byte V3 extension (CRC, timestamps, UUID, etc.).
 type InodeCoreV3Ext struct {
 	CRC         uint32
 	Changecount uint64
@@ -237,7 +237,7 @@ type InodeCoreV3Ext struct {
 
 // InodeCore represents the full inode core header.
 // For V3 inodes this is 176 bytes (base + v3ext).
-// For V1/V2 inodes only the base (96 bytes) is populated.
+// For V1/V2 inodes only the base (100 bytes) is populated.
 type InodeCore struct {
 	InodeCoreBase
 	InodeCoreV3Ext
@@ -342,7 +342,7 @@ func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, erro
 	return inode, nil
 }
 
-func (xfs *FileSystem) walkBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr, inode Inode) (uint16, []BmbtKey, []BmbtPtr, error) {
+func (xfs *FileSystem) walkBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr) (uint16, []BmbtKey, []BmbtPtr, error) {
 	if level == 1 {
 		return level, keys, ptrs, nil
 	}
@@ -350,19 +350,19 @@ func (xfs *FileSystem) walkBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr, i
 	var retKeys []BmbtKey
 	var retPtrs []BmbtPtr
 	for _, ptr := range ptrs {
-		nodeKeys, nodePtrs, err := xfs.parseBtreeNode(int64(ptr), inode)
+		nodeKeys, nodePtrs, err := xfs.parseBtreeNode(int64(ptr))
 		if err != nil {
-			return 0, nil, nil, xerrors.Errorf("parse btree node (inode: %v, ptr: %d) error: %w", inode, ptr, err)
+			return 0, nil, nil, xerrors.Errorf("parse btree node (ptr: %d) error: %w", ptr, err)
 		}
 		retKeys = append(retKeys, nodeKeys...)
 		retPtrs = append(retPtrs, nodePtrs...)
 	}
 	level--
-	return xfs.walkBtree(level, retKeys, retPtrs, inode)
+	return xfs.walkBtree(level, retKeys, retPtrs)
 }
 
-func (xfs *FileSystem) parseMultiLevelBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr, inode Inode) ([]BmbtRec, error) {
-	_, leafKeys, leafPtrs, err := xfs.walkBtree(level, keys, ptrs, inode)
+func (xfs *FileSystem) parseMultiLevelBtree(level uint16, keys []BmbtKey, ptrs []BmbtPtr) ([]BmbtRec, error) {
+	_, leafKeys, leafPtrs, err := xfs.walkBtree(level, keys, ptrs)
 	if err != nil {
 		return nil, xerrors.Errorf("walk Btree error: %w", err)
 	}
@@ -382,7 +382,7 @@ func (xfs *FileSystem) parseSingleLevelBtree(keys []BmbtKey, ptrs []BmbtPtr) ([]
 	return ret, nil
 }
 
-func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16) ([]BmbtKey, []BmbtPtr, error) {
+func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, numrecs uint16, maxrecs int) ([]BmbtKey, []BmbtPtr, error) {
 	// parse bmbt keys
 	var keys []BmbtKey
 	for i := uint16(0); i < numrecs; i++ {
@@ -393,10 +393,9 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16)
 		keys = append(keys, key)
 	}
 
-	// Calculate maxrecs for the bmbr block root in the inode data fork.
-	// Layout: bmdr_block header (4 bytes) + keys[maxrecs] (8 bytes each) + ptrs[maxrecs] (8 bytes each)
-	// maxrecs = (data_fork_size - bmdr_header_size) / (key_size + ptr_size)
-	maxrecs := (xfs.DataForkSize(inode.inodeCore.Forkoff, inode.inodeCore.Version) - 4) / 16
+	// Skip tail keys padding between keys[] and ptrs[] arrays.
+	// The on-disk layout is: keys[maxrecs] + ptrs[maxrecs], so we must skip
+	// (maxrecs - numrecs) unused key slots to reach the pointer array.
 	tailKeysCount := maxrecs - int(numrecs)
 	tailBuf := make([]byte, 8*tailKeysCount)
 	n, err := r.Read(tailBuf)
@@ -429,7 +428,9 @@ func (xfs *FileSystem) parseBmbrBlock(r io.Reader, inode Inode) (*BmbrBlock, err
 		return nil, xerrors.Errorf("binary read bmbr block numerecs error: %w", err)
 	}
 
-	bmbrBlock.keys, bmbrBlock.ptrs, err = xfs.parseBmbtKeyPtr(r, inode, bmbrBlock.Numrecs)
+	// BMBR root maxrecs: layout is bmdr_header (4 bytes) + keys[maxrecs] (8 each) + ptrs[maxrecs] (8 each)
+	bmbrMaxrecs := (xfs.DataForkSize(inode.inodeCore.Forkoff, inode.inodeCore.Version) - 4) / 16
+	bmbrBlock.keys, bmbrBlock.ptrs, err = xfs.parseBmbtKeyPtr(r, bmbrBlock.Numrecs, bmbrMaxrecs)
 	if err != nil {
 		return nil, xerrors.Errorf("parse bmbr key-ptr error: %w", err)
 	}
@@ -457,7 +458,6 @@ func (xfs *FileSystem) inodeFormatBtree(r io.Reader, inode Inode) (Inode, error)
 			bmbrBlock.Level,
 			bmbrBlock.keys,
 			bmbrBlock.ptrs,
-			inode,
 		)
 		if err != nil {
 			return Inode{}, xerrors.Errorf("parse multi level btree error: %w", err)
@@ -512,7 +512,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	}
 
 	if inode.inodeCore.Version == 3 {
-		// Stage 2: Read V3 extension (80 bytes)
+		// Stage 2: Read V3 extension (76 bytes)
 		if err := binary.Read(r, binary.BigEndian, &inode.inodeCore.InodeCoreV3Ext); err != nil {
 			return nil, xerrors.Errorf("failed to read InodeCoreV3Ext: %w", err)
 		}
@@ -573,7 +573,7 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, error) {
 	return btreeBlock, nil
 }
 
-func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey, []BmbtPtr, error) {
+func (xfs *FileSystem) parseBtreeNode(blockNumber int64) ([]BmbtKey, []BmbtPtr, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
 	_, err := xfs.seekBlock(physicalBlockOffset)
 	if err != nil {
@@ -590,7 +590,10 @@ func (xfs *FileSystem) parseBtreeNode(blockNumber int64, inode Inode) ([]BmbtKey
 		return nil, nil, xerrors.Errorf("parse btree node (offset: %d) error: %w", blockNumber, err)
 	}
 
-	keys, ptrs, err := xfs.parseBmbtKeyPtr(r, inode, btreeBlock.Numrecs)
+	// Intermediate/leaf node maxrecs: layout is BtreeBlock header + keys[maxrecs] (8 each) + ptrs[maxrecs] (8 each)
+	btreeHeaderSize := binary.Size(BtreeBlock{})
+	nodeMaxrecs := (int(xfs.PrimaryAG.SuperBlock.BlockSize) - btreeHeaderSize) / 16
+	keys, ptrs, err := xfs.parseBmbtKeyPtr(r, btreeBlock.Numrecs, nodeMaxrecs)
 	if err != nil {
 		return nil, nil, xerrors.Errorf("parse bmbr key-ptr error: %w", err)
 	}
@@ -826,7 +829,9 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 
 func (xfs *FileSystem) nextBlockIsLeader(blockOffset uint64) bool {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset + 1)
-	xfs.seekBlock(physicalBlockOffset)
+	if _, err := xfs.seekBlock(physicalBlockOffset); err != nil {
+		return false
+	}
 	blockData, err := xfs.readBlock(1)
 	if err != nil {
 		return false
