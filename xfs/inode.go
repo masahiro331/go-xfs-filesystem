@@ -250,6 +250,7 @@ type InobtRec struct {
 }
 
 // Holemask returns the sparse inode holemask from ir_holemask (bits 31:16 of Freecount).
+// Freecount is read via binary.BigEndian, so host-order bit shifts match the on-disk layout.
 // Each bit represents 4 inodes; 1 = hole (no inode allocated).
 func (r InobtRec) Holemask() uint16 {
 	return uint16(r.Freecount >> 16)
