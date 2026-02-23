@@ -4,6 +4,9 @@ const (
 	BMBT_EXNTFLAG_BITLEN = 1
 	INODEV3_SIZE         = 176
 	INODE_SIZE           = 96
+	// INODE_CORE_BASE_SIZE is the binary size of InodeCoreBase (96-byte core + 4-byte NextUnlinked).
+	// This corresponds to offsetof(xfs_dinode, di_crc) in the Linux kernel.
+	INODE_CORE_BASE_SIZE = 100
 	LEAF_ENTRY_SIZE      = 8
 
 	XFS_DIR2_DATA_FD_COUNT  = 3

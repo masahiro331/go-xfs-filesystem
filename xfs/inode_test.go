@@ -1,6 +1,7 @@
 package xfs
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -13,30 +14,49 @@ func TestDataForkSize(t *testing.T) {
 		name      string
 		inodesize uint16
 		forkoff   uint8
+		version   uint8
 		expected  int
 	}{
 		{
-			name:      "forkoff=0, inodesize=256",
+			name:      "V3, forkoff=0, inodesize=256",
 			inodesize: 256,
 			forkoff:   0,
+			version:   3,
 			expected:  256 - 176, // 80
 		},
 		{
-			name:      "forkoff=0, inodesize=512",
+			name:      "V3, forkoff=0, inodesize=512",
 			inodesize: 512,
 			forkoff:   0,
+			version:   3,
 			expected:  512 - 176, // 336
 		},
 		{
-			name:      "forkoff>0, forkoff=24",
+			name:      "V2, forkoff=0, inodesize=256",
+			inodesize: 256,
+			forkoff:   0,
+			version:   2,
+			expected:  256 - INODE_CORE_BASE_SIZE, // 156
+		},
+		{
+			name:      "V1, forkoff=0, inodesize=256",
+			inodesize: 256,
+			forkoff:   0,
+			version:   1,
+			expected:  256 - INODE_CORE_BASE_SIZE, // 156
+		},
+		{
+			name:      "V3, forkoff>0, forkoff=24",
 			inodesize: 256,
 			forkoff:   24,
+			version:   3,
 			expected:  24 << 3, // 192
 		},
 		{
-			name:      "forkoff>0, forkoff=10",
+			name:      "V2, forkoff>0, forkoff=10",
 			inodesize: 512,
 			forkoff:   10,
+			version:   2,
 			expected:  10 << 3, // 80
 		},
 	}
@@ -50,11 +70,47 @@ func TestDataForkSize(t *testing.T) {
 					},
 				},
 			}
-			got := fs.DataForkSize(tt.forkoff)
+			got := fs.DataForkSize(tt.forkoff, tt.version)
 			if got != tt.expected {
-				t.Errorf("DataForkSize(%d) = %d, want %d", tt.forkoff, got, tt.expected)
+				t.Errorf("DataForkSize(%d, %d) = %d, want %d", tt.forkoff, tt.version, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestInodeCoreBaseSize(t *testing.T) {
+	size := binary.Size(InodeCoreBase{})
+	if size != INODE_CORE_BASE_SIZE {
+		t.Errorf("InodeCoreBase binary size = %d, want %d", size, INODE_CORE_BASE_SIZE)
+	}
+}
+
+func TestInodeCoreV3ExtSize(t *testing.T) {
+	size := binary.Size(InodeCoreV3Ext{})
+	expected := INODEV3_SIZE - INODE_CORE_BASE_SIZE
+	if size != expected {
+		t.Errorf("InodeCoreV3Ext binary size = %d, want %d", size, expected)
+	}
+}
+
+func TestInodeCoreIsSupported(t *testing.T) {
+	tests := []struct {
+		version  uint8
+		expected bool
+	}{
+		{version: 0, expected: false},
+		{version: 1, expected: true},
+		{version: 2, expected: true},
+		{version: 3, expected: true},
+		{version: 4, expected: false},
+	}
+	for _, tt := range tests {
+		ic := InodeCore{}
+		ic.Version = tt.version
+		got := ic.isSupported()
+		if got != tt.expected {
+			t.Errorf("isSupported() version=%d: got %v, want %v", tt.version, got, tt.expected)
+		}
 	}
 }
 

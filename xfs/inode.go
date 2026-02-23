@@ -194,7 +194,8 @@ type SymlinkString struct {
 	Name string
 }
 
-type InodeCore struct {
+// InodeCoreBase is the common 96-byte inode core header shared by V1, V2, and V3 inodes.
+type InodeCoreBase struct {
 	Magic        uint16
 	Mode         uint16
 	Version      uint8
@@ -221,7 +222,10 @@ type InodeCore struct {
 	Flags        uint16
 	Gen          uint32
 	NextUnlinked uint32
+}
 
+// InodeCoreV3Ext is the 80-byte V3 extension (CRC, timestamps, UUID, etc.).
+type InodeCoreV3Ext struct {
 	CRC         uint32
 	Changecount uint64
 	Lsn         uint64
@@ -231,6 +235,14 @@ type InodeCore struct {
 	Crtime      uint64
 	Ino         uint64
 	MetaUUID    [16]byte
+}
+
+// InodeCore represents the full inode core header.
+// For V3 inodes this is 176 bytes (base + v3ext).
+// For V1/V2 inodes only the base (96 bytes) is populated.
+type InodeCore struct {
+	InodeCoreBase
+	InodeCoreV3Ext
 }
 
 type InobtRec struct {
@@ -385,7 +397,7 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16)
 	// Calculate maxrecs for the bmbr block root in the inode data fork.
 	// Layout: bmdr_block header (4 bytes) + keys[maxrecs] (8 bytes each) + ptrs[maxrecs] (8 bytes each)
 	// maxrecs = (data_fork_size - bmdr_header_size) / (key_size + ptr_size)
-	maxrecs := (xfs.DataForkSize(inode.inodeCore.Forkoff) - 4) / 16
+	maxrecs := (xfs.DataForkSize(inode.inodeCore.Forkoff, inode.inodeCore.Version) - 4) / 16
 	tailKeysCount := maxrecs - int(numrecs)
 	tailBuf := make([]byte, 8*tailKeysCount)
 	n, err := r.Read(tailBuf)
@@ -487,8 +499,9 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	}
 	r := bytes.NewReader(buf)
 
-	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore); err != nil {
-		return nil, xerrors.Errorf("failed to read InodeCore: %w", err)
+	// Stage 1: Read the base 96-byte inode core (common to V1/V2/V3)
+	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore.InodeCoreBase); err != nil {
+		return nil, xerrors.Errorf("failed to read InodeCoreBase: %w", err)
 	}
 
 	if inode.inodeCore.Magic != XFS_DINODE_MAGIC {
@@ -497,6 +510,19 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 
 	if !inode.inodeCore.isSupported() {
 		return nil, xerrors.Errorf("not support inode version %d", inode.inodeCore.Version)
+	}
+
+	if inode.inodeCore.Version == 3 {
+		// Stage 2: Read V3 extension (80 bytes)
+		if err := binary.Read(r, binary.BigEndian, &inode.inodeCore.InodeCoreV3Ext); err != nil {
+			return nil, xerrors.Errorf("failed to read InodeCoreV3Ext: %w", err)
+		}
+	} else {
+		// V1/V2: Promote OnLink to NLink, set Ino from argument
+		if inode.inodeCore.Version == 1 {
+			inode.inodeCore.NLink = uint32(inode.inodeCore.OnLink)
+		}
+		inode.inodeCore.Ino = ino
 	}
 
 	switch inode.inodeCore.Format {
@@ -610,11 +636,15 @@ func BmbrMaxRecs(blocklen int) int {
 }
 
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1077-L1078
-func (xfs *FileSystem) DataForkSize(forkoff uint8) int {
+func (xfs *FileSystem) DataForkSize(forkoff uint8, version uint8) int {
 	if forkoff > 0 {
 		return int(forkoff) << 3
 	}
-	return int(xfs.PrimaryAG.SuperBlock.Inodesize) - 176 // v3 InodeCore size
+	coreSize := INODE_CORE_BASE_SIZE
+	if version == 3 {
+		coreSize = INODEV3_SIZE
+	}
+	return int(xfs.PrimaryAG.SuperBlock.Inodesize) - coreSize
 }
 
 func (i *Inode) AttributeOffset() uint32 {
@@ -853,7 +883,7 @@ func (ic InodeCore) IsSymlink() bool {
 }
 
 func (ic InodeCore) isSupported() bool {
-	return ic.Version == uint8(InodeSupportVersion)
+	return ic.Version >= 1 && ic.Version <= 3
 }
 
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_bmap_btree.c#L60
