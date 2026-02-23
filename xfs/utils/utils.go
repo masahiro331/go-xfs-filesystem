@@ -22,18 +22,9 @@ func DefaultSectorReader() *sectorReader {
 	}
 }
 
-var allowedSectorSize = []int{512, 4096}
-
 func NewSectorReader(sectorSize int) (*sectorReader, error) {
-	validSectorSize := false
-	for _, s := range allowedSectorSize {
-		if s == sectorSize {
-			validSectorSize = true
-			break
-		}
-	}
-	if !validSectorSize {
-		return nil, fmt.Errorf("failed to instantiate chunk reader, invalid sector size: %d", sectorSize)
+	if sectorSize < SectorSize || sectorSize%SectorSize != 0 {
+		return nil, fmt.Errorf("failed to instantiate chunk reader, invalid sector size: %d, must be a multiple of %d", sectorSize, SectorSize)
 	}
 
 	return &sectorReader{
