@@ -8,6 +8,56 @@ import (
 	"testing"
 )
 
+func TestDataForkSize(t *testing.T) {
+	tests := []struct {
+		name      string
+		inodesize uint16
+		forkoff   uint8
+		expected  int
+	}{
+		{
+			name:      "forkoff=0, inodesize=256",
+			inodesize: 256,
+			forkoff:   0,
+			expected:  256 - 176, // 80
+		},
+		{
+			name:      "forkoff=0, inodesize=512",
+			inodesize: 512,
+			forkoff:   0,
+			expected:  512 - 176, // 336
+		},
+		{
+			name:      "forkoff>0, forkoff=24",
+			inodesize: 256,
+			forkoff:   24,
+			expected:  24 << 3, // 192
+		},
+		{
+			name:      "forkoff>0, forkoff=10",
+			inodesize: 512,
+			forkoff:   10,
+			expected:  10 << 3, // 80
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := &FileSystem{
+				PrimaryAG: AG{
+					SuperBlock: SuperBlock{
+						Inodesize: tt.inodesize,
+					},
+				},
+			}
+			got := fs.DataForkSize(tt.forkoff)
+			if got != tt.expected {
+				t.Errorf("DataForkSize(%d) = %d, want %d", tt.forkoff, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestParseInode(t *testing.T) {
 	testCases := []struct {
 		filesystem  string

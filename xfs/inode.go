@@ -366,24 +366,11 @@ func (xfs *FileSystem) parseBmbtKeyPtr(r io.Reader, inode Inode, numrecs uint16)
 		keys = append(keys, key)
 	}
 
-	// Aformat is type of attribute fork
-	// 1: local
-	// 2: extents
-	// 3. btree
-	if inode.inodeCore.Aformat != 1 && inode.inodeCore.Forkoff != 0 {
-		return nil, nil, xerrors.Errorf("unsupported attribute fork error")
-	}
-
-	// read memory align
-	// TODO: check please this calculation
-	var tailKeysCount int
-	if inode.inodeCore.Forkoff == 0 {
-		// 20 is default value of key/pointer length
-		tailKeysCount = 20 - int(numrecs)
-	} else {
-		// (Forkoff - padding / 2(key/pointers)) - numrecs
-		tailKeysCount = int((inode.inodeCore.Forkoff-1)/2) - int(numrecs)
-	}
+	// Calculate maxrecs for the bmbr block root in the inode data fork.
+	// Layout: bmdr_block header (4 bytes) + keys[maxrecs] (8 bytes each) + ptrs[maxrecs] (8 bytes each)
+	// maxrecs = (data_fork_size - bmdr_header_size) / (key_size + ptr_size)
+	maxrecs := (xfs.DataForkSize(inode.inodeCore.Forkoff) - 4) / 16
+	tailKeysCount := maxrecs - int(numrecs)
 	tailBuf := make([]byte, 8*tailKeysCount)
 	n, err := r.Read(tailBuf)
 	if err != nil {
