@@ -90,6 +90,9 @@ func (xfs *FileSystem) Close() error {
 // XFS has two timestamp formats:
 // - Legacy: upper 32 bits = nanoseconds, lower 32 bits = seconds (signed, since Unix epoch)
 // - Bigtime: 64-bit nanoseconds since Dec 13, 1901 20:45:52 UTC
+//
+// NOTE: This must be used for all inode timestamp fields (Atime, Mtime, Ctime, Crtime)
+// when they are exposed, not just Mtime.
 func parseTimestamp(ts uint64, bigtime bool) time.Time {
 	if bigtime {
 		// Bigtime format: 64-bit nanoseconds since bigtime epoch
