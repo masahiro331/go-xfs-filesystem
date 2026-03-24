@@ -525,6 +525,133 @@ func TestFileInfoMode(t *testing.T) {
 	}
 }
 
+func TestParseBtreeBlock_V4Magic(t *testing.T) {
+	// Build a minimal V4 btree block header (24 bytes, big-endian).
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.BigEndian, uint32(XFS_BMAP_MAGICa)) // Magic
+	binary.Write(&buf, binary.BigEndian, uint16(1))                // Level
+	binary.Write(&buf, binary.BigEndian, uint16(3))                // Numrecs
+	binary.Write(&buf, binary.BigEndian, int64(-1))                // BbLeftsib
+	binary.Write(&buf, binary.BigEndian, int64(-1))                // BbRightsib
+
+	xfs := &FileSystem{}
+	block, headerSize, err := xfs.parseBtreeBlock(&buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if block.Magic != XFS_BMAP_MAGICa {
+		t.Errorf("Magic = 0x%x, want 0x%x", block.Magic, XFS_BMAP_MAGICa)
+	}
+	if block.Level != 1 {
+		t.Errorf("Level = %d, want 1", block.Level)
+	}
+	if block.Numrecs != 3 {
+		t.Errorf("Numrecs = %d, want 3", block.Numrecs)
+	}
+	expectedSize := binary.Size(BtreeBlockV4{})
+	if headerSize != expectedSize {
+		t.Errorf("headerSize = %d, want %d", headerSize, expectedSize)
+	}
+}
+
+func TestParseBtreeBlock_V5Magic(t *testing.T) {
+	// Build a V5 btree block header (72 bytes, big-endian).
+	var buf bytes.Buffer
+	// V4 base (24 bytes)
+	binary.Write(&buf, binary.BigEndian, uint32(XFS_BMAP_CRC_MAGIC))
+	binary.Write(&buf, binary.BigEndian, uint16(0))
+	binary.Write(&buf, binary.BigEndian, uint16(5))
+	binary.Write(&buf, binary.BigEndian, int64(-1))
+	binary.Write(&buf, binary.BigEndian, int64(-1))
+	// V5 extension (48 bytes)
+	binary.Write(&buf, binary.BigEndian, uint64(100))  // BbBlockNo
+	binary.Write(&buf, binary.BigEndian, uint64(200))  // BbLsn
+	binary.Write(&buf, binary.BigEndian, [16]byte{})   // UUID
+	binary.Write(&buf, binary.BigEndian, uint64(300))  // BbOwner
+	binary.Write(&buf, binary.BigEndian, uint32(0xAB)) // CRC
+	binary.Write(&buf, binary.BigEndian, int32(0))     // Padding
+
+	xfs := &FileSystem{}
+	block, headerSize, err := xfs.parseBtreeBlock(&buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if block.Magic != XFS_BMAP_CRC_MAGIC {
+		t.Errorf("Magic = 0x%x, want 0x%x", block.Magic, XFS_BMAP_CRC_MAGIC)
+	}
+	if block.Numrecs != 5 {
+		t.Errorf("Numrecs = %d, want 5", block.Numrecs)
+	}
+	if block.BbBlockNo != 100 {
+		t.Errorf("BbBlockNo = %d, want 100", block.BbBlockNo)
+	}
+	if block.BbOwner != 300 {
+		t.Errorf("BbOwner = %d, want 300", block.BbOwner)
+	}
+	expectedSize := binary.Size(BtreeBlock{})
+	if headerSize != expectedSize {
+		t.Errorf("headerSize = %d, want %d", headerSize, expectedSize)
+	}
+}
+
+func TestParseBtreeBlock_UnsupportedMagic(t *testing.T) {
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.BigEndian, uint32(0xDEADBEEF))
+	binary.Write(&buf, binary.BigEndian, uint16(0))
+	binary.Write(&buf, binary.BigEndian, uint16(0))
+	binary.Write(&buf, binary.BigEndian, int64(0))
+	binary.Write(&buf, binary.BigEndian, int64(0))
+
+	xfs := &FileSystem{}
+	_, _, err := xfs.parseBtreeBlock(&buf)
+	if err == nil {
+		t.Fatal("expected error for unsupported magic, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported block header magic") {
+		t.Errorf("unexpected error: %s", err.Error())
+	}
+}
+
+func TestSkipDirBlockHeader(t *testing.T) {
+	tests := []struct {
+		name  string
+		magic uint32
+		size  int // expected bytes consumed
+	}{
+		{"V5 data", XFS_DIR3_DATA_MAGIC, binary.Size(Dir3DataHdr{})},
+		{"V5 block", XFS_DIR3_BLOCK_MAGIC, binary.Size(Dir3DataHdr{})},
+		{"V4 data", XFS_DIR2_DATA_MAGIC, binary.Size(Dir2DataHdr{})},
+		{"V4 block", XFS_DIR2_BLOCK_MAGIC, binary.Size(Dir2DataHdr{})},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := make([]byte, 256) // large enough for any header
+			binary.BigEndian.PutUint32(buf[:4], tt.magic)
+			reader := bytes.NewReader(buf)
+
+			xfs := &FileSystem{}
+			err := xfs.skipDirBlockHeader(reader, tt.magic)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			consumed := 256 - reader.Len()
+			if consumed != tt.size {
+				t.Errorf("consumed %d bytes, want %d", consumed, tt.size)
+			}
+		})
+	}
+}
+
+func TestSkipDirBlockHeader_UnsupportedMagic(t *testing.T) {
+	xfs := &FileSystem{}
+	err := xfs.skipDirBlockHeader(bytes.NewReader(nil), 0xDEAD)
+	if err == nil {
+		t.Fatal("expected error for unsupported magic, got nil")
+	}
+}
+
 func TestParseInode(t *testing.T) {
 	testCases := []struct {
 		filesystem  string

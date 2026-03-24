@@ -582,25 +582,24 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, int, error) {
 
 	switch v4.Magic {
 	case XFS_BMAP_CRC_MAGIC:
-		// V5: read the remaining 48 bytes (72 - 24).
-		if err := binary.Read(r, binary.BigEndian, &btreeBlock.BbBlockNo); err != nil {
+		// V5: read the remaining 48 bytes (72 - 24) in one call.
+		var ext struct {
+			BbBlockNo uint64
+			BbLsn     uint64
+			UUID      [16]byte
+			BbOwner   uint64
+			CRC       uint32
+			Padding   int32
+		}
+		if err := binary.Read(r, binary.BigEndian, &ext); err != nil {
 			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
 		}
-		if err := binary.Read(r, binary.BigEndian, &btreeBlock.BbLsn); err != nil {
-			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
-		}
-		if err := binary.Read(r, binary.BigEndian, &btreeBlock.UUID); err != nil {
-			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
-		}
-		if err := binary.Read(r, binary.BigEndian, &btreeBlock.BbOwner); err != nil {
-			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
-		}
-		if err := binary.Read(r, binary.BigEndian, &btreeBlock.CRC); err != nil {
-			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
-		}
-		if err := binary.Read(r, binary.BigEndian, &btreeBlock.Padding); err != nil {
-			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
-		}
+		btreeBlock.BbBlockNo = ext.BbBlockNo
+		btreeBlock.BbLsn = ext.BbLsn
+		btreeBlock.UUID = ext.UUID
+		btreeBlock.BbOwner = ext.BbOwner
+		btreeBlock.CRC = ext.CRC
+		btreeBlock.Padding = ext.Padding
 		return btreeBlock, binary.Size(BtreeBlock{}), nil
 	case XFS_BMAP_MAGICa:
 		// V4: header is complete (24 bytes).
