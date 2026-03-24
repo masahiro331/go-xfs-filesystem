@@ -537,8 +537,9 @@ func (f *File) Read(buf []byte) (int, error) {
 	if !ok {
 		if f.Size()-f.blockSize*f.currentBlock < f.blockSize {
 			f.buffer.Write(make([]byte, f.Size()-f.blockSize*f.currentBlock))
+		} else {
+			f.buffer.Write(make([]byte, f.blockSize))
 		}
-		f.buffer.Write(make([]byte, f.blockSize))
 	} else {
 		_, err := f.fs.seekBlock(offset)
 		if err != nil {
