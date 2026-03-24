@@ -904,6 +904,7 @@ func (b BmbtRec) Unpack() BmbtIrec {
 		StartOff:   (b.L0 & Mask64Lo(64-BMBT_EXNTFLAG_BITLEN)) >> 9,
 		StartBlock: ((b.L0 & Mask64Lo(9)) << 43) | (b.L1 >> 21),
 		BlockCount: b.L1 & Mask64Lo(21),
+		State:      uint8(b.L0 >> 63),
 	}
 }
 

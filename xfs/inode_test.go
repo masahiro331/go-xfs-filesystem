@@ -621,3 +621,47 @@ func TestParseInode(t *testing.T) {
 		})
 	}
 }
+
+func TestBmbtRecUnpackState(t *testing.T) {
+	tests := []struct {
+		name          string
+		l0            uint64
+		l1            uint64
+		expectedState uint8
+	}{
+		{
+			name:          "normal extent (state=0)",
+			l0:            0x0000000000000000,
+			l1:            0x0000000000000001,
+			expectedState: 0,
+		},
+		{
+			name:          "unwritten extent (state=1)",
+			l0:            0x8000000000000000, // bit 63 set
+			l1:            0x0000000000000001,
+			expectedState: 1,
+		},
+		{
+			name:          "normal extent with data",
+			l0:            0x0000000100000002, // startoff=0x800001, startblock high bits=2
+			l1:            0x000000000000000A, // startblock low + blockcount=10
+			expectedState: 0,
+		},
+		{
+			name:          "unwritten extent with data",
+			l0:            0x8000000100000002, // bit 63 set + same data
+			l1:            0x000000000000000A,
+			expectedState: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := BmbtRec{L0: tt.l0, L1: tt.l1}
+			irec := rec.Unpack()
+			if irec.State != tt.expectedState {
+				t.Errorf("expected State=%d, got State=%d", tt.expectedState, irec.State)
+			}
+		})
+	}
+}

@@ -135,6 +135,11 @@ func (xfs *FileSystem) newFile(dirEntry dirEntry) (*File, error) {
 	dt := make(dataTable)
 	for _, rec := range recs {
 		p := rec.Unpack()
+		// Unwritten extents (State == 1) are preallocated but not yet written.
+		// They should be read as zero-filled data, so skip adding them to the table.
+		if p.State != 0 {
+			continue
+		}
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
 		for i := int64(0); i < int64(p.BlockCount); i++ {
 			dt[int64(p.StartOff)+i] = physicalBlockOffset + i
