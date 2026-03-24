@@ -447,7 +447,11 @@ func (xfs *FileSystem) parseBmbrBlock(r io.Reader, inode Inode) (*BmbrBlock, err
 	}
 
 	// BMBR root maxrecs: layout is bmdr_header (4 bytes) + keys[maxrecs] (8 each) + ptrs[maxrecs] (8 each)
-	bmbrMaxrecs := (xfs.DataForkSize(inode.inodeCore.Forkoff, inode.inodeCore.Version) - 4) / 16
+	dataForkSize := xfs.DataForkSize(inode.inodeCore.Forkoff, inode.inodeCore.Version)
+	bmbrMaxrecs := (dataForkSize - 4) / 16
+	if bmbrMaxrecs <= 0 {
+		return nil, xerrors.Errorf("data fork too small for BMBR: size=%d", dataForkSize)
+	}
 	bmbrBlock.keys, bmbrBlock.ptrs, err = xfs.parseBmbtKeyPtr(r, bmbrBlock.Numrecs, bmbrMaxrecs)
 	if err != nil {
 		return nil, xerrors.Errorf("parse bmbr key-ptr error: %w", err)
