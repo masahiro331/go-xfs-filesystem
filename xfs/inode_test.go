@@ -503,7 +503,7 @@ func TestFileInfoMode(t *testing.T) {
 		{
 			name:     "char device",
 			mode:     0x2000 | 0o666,
-			expected: fs.ModeCharDevice | 0o666,
+			expected: fs.ModeCharDevice | fs.ModeDevice | 0o666,
 		},
 		{
 			name:     "named pipe",

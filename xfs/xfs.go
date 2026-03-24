@@ -479,7 +479,7 @@ func (i FileInfo) Mode() fs.FileMode {
 	case 0x4000:
 		translatedMode |= fs.ModeDir
 	case 0x2000:
-		translatedMode |= fs.ModeCharDevice
+		translatedMode |= fs.ModeCharDevice | fs.ModeDevice
 	case 0x1000:
 		translatedMode |= fs.ModeNamedPipe
 	default:
