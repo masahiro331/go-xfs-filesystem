@@ -355,7 +355,13 @@ func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, erro
 	return inode, nil
 }
 
+// maxBtreeLevel is a sanity limit to guard against corrupted images.
+const maxBtreeLevel = 64
+
 func (xfs *FileSystem) walkBtree(level uint16, ptrs []BmbtPtr) (uint16, []BmbtPtr, error) {
+	if level > maxBtreeLevel {
+		return 0, nil, xerrors.Errorf("B+tree level too deep: %d", level)
+	}
 	if level == 1 {
 		return level, ptrs, nil
 	}
