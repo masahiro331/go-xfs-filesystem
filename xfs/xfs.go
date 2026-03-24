@@ -97,8 +97,8 @@ func (xfs *FileSystem) Close() error {
 func parseTimestamp(ts uint64, bigtime bool) time.Time {
 	if bigtime {
 		// Bigtime format: 64-bit nanoseconds since bigtime epoch
-		sec := int64(ts/1e9) - XFS_BIGTIME_EPOCH_OFFSET
-		nsec := int64(ts % 1e9)
+		sec := int64(ts/1_000_000_000) - XFS_BIGTIME_EPOCH_OFFSET
+		nsec := int64(ts % 1_000_000_000)
 		return time.Unix(sec, nsec)
 	}
 

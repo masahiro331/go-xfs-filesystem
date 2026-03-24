@@ -33,15 +33,23 @@ func TestParseTimestamp(t *testing.T) {
 		},
 		{
 			name:     "bigtime: epoch offset yields Unix epoch",
-			ts:       uint64(XFS_BIGTIME_EPOCH_OFFSET) * 1e9,
+			ts:       uint64(XFS_BIGTIME_EPOCH_OFFSET) * 1_000_000_000,
 			bigtime:  true,
 			expected: time.Unix(0, 0),
 		},
 		{
 			name:     "bigtime: known nanoseconds",
-			ts:       uint64(XFS_BIGTIME_EPOCH_OFFSET)*1e9 + 1000*1e9 + 500,
+			ts:       uint64(XFS_BIGTIME_EPOCH_OFFSET)*1_000_000_000 + 1000*1_000_000_000 + 500,
 			bigtime:  true,
 			expected: time.Unix(1000, 500),
+		},
+		{
+			// nsec precision: float64(9007199255000123) / 1e9 yields nsec=255000124,
+			// but integer division correctly gives nsec=255000123.
+			name:     "bigtime: nsec precision with integer division",
+			ts:       9007199255000123,
+			bigtime:  true,
+			expected: time.Unix(9007199-XFS_BIGTIME_EPOCH_OFFSET, 255000123),
 		},
 	}
 
