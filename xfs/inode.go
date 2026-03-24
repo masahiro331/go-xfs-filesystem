@@ -295,8 +295,9 @@ func (xfs *FileSystem) inodeFormatLocal(r io.Reader, inode Inode) (Inode, error)
 		if inode.directoryLocal.dir2SfHdr.I8Count != 0 {
 			isI8count = true
 		}
+		hasFtype := xfs.PrimaryAG.SuperBlock.HasFtype()
 		for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
-			entry, err := parseEntry(r, isI8count)
+			entry, err := parseEntry(r, isI8count, hasFtype)
 			if err != nil {
 				return Inode{}, xerrors.Errorf("failed to parse entries[%d]: %w", i, err)
 			}
@@ -714,7 +715,7 @@ func (xfs *FileSystem) skipDirBlockHeader(r io.Reader, magic uint32) error {
 }
 
 // Parse XDB3block, XDB3 block is single block architecture
-func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
+func (xfs *FileSystem) parseXDB3Block(r io.Reader, hasFtype bool) ([]Dir2DataEntry, error) {
 	buf, err := io.ReadAll(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read XDB3 block reader: %w", err)
@@ -736,7 +737,7 @@ func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
 	}
 	reader := bytes.NewReader(buf[:dataEndOffset])
 
-	dir2DataEntries, err := xfs.parseDir2DataEntry(reader)
+	dir2DataEntries, err := xfs.parseDir2DataEntry(reader, hasFtype)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse dir2 Data Entry: %w", err)
 	}
@@ -744,15 +745,15 @@ func (xfs *FileSystem) parseXDB3Block(r io.Reader) ([]Dir2DataEntry, error) {
 }
 
 // Parse XDD3block, XDD3 block is multi block architecture
-func (xfs *FileSystem) parseXDD3Block(r io.Reader) ([]Dir2DataEntry, error) {
-	dir2DataEntries, err := xfs.parseDir2DataEntry(r)
+func (xfs *FileSystem) parseXDD3Block(r io.Reader, hasFtype bool) ([]Dir2DataEntry, error) {
+	dir2DataEntries, err := xfs.parseDir2DataEntry(r, hasFtype)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse dir2 Data Entry: %w", err)
 	}
 	return dir2DataEntries, nil
 }
 
-func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) {
+func (xfs *FileSystem) parseDir2DataEntry(r io.Reader, hasFtype bool) ([]Dir2DataEntry, error) {
 	entries := []Dir2DataEntry{}
 	for {
 		entry := Dir2DataEntry{}
@@ -793,15 +794,19 @@ func (xfs *FileSystem) parseDir2DataEntry(r io.Reader) ([]Dir2DataEntry, error) 
 		}
 		entry.EntryName = string(nameBuf)
 
-		// Parse FileType
-		if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
-			return nil, xerrors.Errorf("failed to read file type: %w", err)
+		// Parse FileType (only present when ftype feature is enabled)
+		filetypeSize := 0
+		if hasFtype {
+			if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
+				return nil, xerrors.Errorf("failed to read file type: %w", err)
+			}
+			filetypeSize = int(unsafe.Sizeof(entry.Filetype))
 		}
 
 		// Read Alignment, Dir2DataEntry is 8byte alignment
 		align := (int(unsafe.Sizeof(entry.Inumber)) +
 			int(unsafe.Sizeof(entry.Namelen)) +
-			int(unsafe.Sizeof(entry.Filetype)) +
+			filetypeSize +
 			int(unsafe.Sizeof(entry.Tag)) +
 			int(entry.Namelen)) % 8
 		if align != 0 {
@@ -859,15 +864,16 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 		if err := xfs.skipDirBlockHeader(reader, magicBytes); err != nil {
 			return nil, xerrors.Errorf("failed to skip dir block header: %w", err)
 		}
+		hasFtype := xfs.PrimaryAG.SuperBlock.HasFtype()
 		switch magicBytes {
 		case XFS_DIR3_DATA_MAGIC, XFS_DIR2_DATA_MAGIC:
-			entries, err := xfs.parseXDD3Block(reader)
+			entries, err := xfs.parseXDD3Block(reader, hasFtype)
 			if err != nil {
 				return nil, xerrors.Errorf("failed to parse dir data block: %w", err)
 			}
 			block.Entries = append(block.Entries, entries...)
 		case XFS_DIR3_BLOCK_MAGIC, XFS_DIR2_BLOCK_MAGIC:
-			entries, err := xfs.parseXDB3Block(reader)
+			entries, err := xfs.parseXDB3Block(reader, hasFtype)
 			if err != nil {
 				return nil, xerrors.Errorf("failed to parse dir block: %w", err)
 			}
@@ -895,7 +901,7 @@ func (xfs *FileSystem) nextBlockIsLeader(blockOffset uint64) bool {
 		magic == XFS_DIR2_DATA_MAGIC || magic == XFS_DIR2_BLOCK_MAGIC
 }
 
-func parseEntry(r io.Reader, i8count bool) (*Dir2SfEntry, error) {
+func parseEntry(r io.Reader, i8count bool, hasFtype bool) (*Dir2SfEntry, error) {
 	var entry Dir2SfEntry
 	if err := binary.Read(r, binary.BigEndian, &entry.Namelen); err != nil {
 		return nil, err
@@ -913,8 +919,10 @@ func parseEntry(r io.Reader, i8count bool) (*Dir2SfEntry, error) {
 		return nil, xerrors.Errorf("read name error: %s", string(buf))
 	}
 	entry.EntryName = string(buf)
-	if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
-		return nil, err
+	if hasFtype {
+		if err := binary.Read(r, binary.BigEndian, &entry.Filetype); err != nil {
+			return nil, err
+		}
 	}
 
 	if i8count {
