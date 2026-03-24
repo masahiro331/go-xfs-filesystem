@@ -677,7 +677,7 @@ func (xfs *FileSystem) DataForkSize(forkoff uint8, version uint8) int {
 	if forkoff > 0 {
 		return int(forkoff) << 3
 	}
-	coreSize := INODE_CORE_BASE_SIZE
+	coreSize := INODEV1V2_SIZE
 	if version == 3 {
 		coreSize = INODEV3_SIZE
 	}
@@ -687,7 +687,7 @@ func (xfs *FileSystem) DataForkSize(forkoff uint8, version uint8) int {
 func (i *Inode) AttributeOffset() uint32 {
 	coreSize := uint32(INODEV3_SIZE)
 	if i.inodeCore.Version < 3 {
-		coreSize = uint32(INODE_CORE_BASE_SIZE)
+		coreSize = uint32(INODEV1V2_SIZE)
 	}
 	return uint32(i.inodeCore.Forkoff)*8 + coreSize
 }

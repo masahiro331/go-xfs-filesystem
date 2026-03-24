@@ -2,11 +2,14 @@ package xfs
 
 const (
 	BMBT_EXNTFLAG_BITLEN = 1
-	INODEV3_SIZE         = 176
-	// INODE_CORE_BASE_SIZE is the binary size of InodeCoreBase (96-byte core + 4-byte NextUnlinked).
-	// This corresponds to offsetof(xfs_dinode, di_crc) in the Linux kernel.
-	INODE_CORE_BASE_SIZE = 100
-	LEAF_ENTRY_SIZE      = 8
+	// INODEV1V2_SIZE is the on-disk size of a V1/V2 inode header:
+	// di_core (96 bytes) + di_next_unlinked (4 bytes) = 100 bytes.
+	// This is where the data fork starts for V1/V2 inodes (offset 0x64).
+	INODEV1V2_SIZE = 100
+	// INODEV3_SIZE is the on-disk size of a V3 inode header (176 bytes).
+	// This is where the data fork starts for V3 inodes (offset 0xb0).
+	INODEV3_SIZE    = 176
+	LEAF_ENTRY_SIZE = 8
 
 	XFS_DIR2_DATA_FD_COUNT  = 3
 	XFS_DIR2_DATA_FREE_TAG  = 0xffff

@@ -38,14 +38,14 @@ func TestDataForkSize(t *testing.T) {
 			inodesize: 256,
 			forkoff:   0,
 			version:   2,
-			expected:  256 - INODE_CORE_BASE_SIZE, // 156
+			expected:  256 - INODEV1V2_SIZE, // 156
 		},
 		{
 			name:      "V1, forkoff=0, inodesize=256",
 			inodesize: 256,
 			forkoff:   0,
 			version:   1,
-			expected:  256 - INODE_CORE_BASE_SIZE, // 156
+			expected:  256 - INODEV1V2_SIZE, // 156
 		},
 		{
 			name:      "V3, forkoff>0, forkoff=24",
@@ -138,14 +138,14 @@ func TestBmbrMaxRecsFromDataFork(t *testing.T) {
 
 func TestInodeCoreBaseSize(t *testing.T) {
 	size := binary.Size(InodeCoreBase{})
-	if size != INODE_CORE_BASE_SIZE {
-		t.Errorf("InodeCoreBase binary size = %d, want %d", size, INODE_CORE_BASE_SIZE)
+	if size != INODEV1V2_SIZE {
+		t.Errorf("InodeCoreBase binary size = %d, want %d", size, INODEV1V2_SIZE)
 	}
 }
 
 func TestInodeCoreV3ExtSize(t *testing.T) {
 	size := binary.Size(InodeCoreV3Ext{})
-	expected := INODEV3_SIZE - INODE_CORE_BASE_SIZE
+	expected := INODEV3_SIZE - INODEV1V2_SIZE
 	if size != expected {
 		t.Errorf("InodeCoreV3Ext binary size = %d, want %d", size, expected)
 	}
@@ -426,13 +426,13 @@ func TestAttributeOffset(t *testing.T) {
 			name:     "V2, forkoff=0",
 			version:  2,
 			forkoff:  0,
-			expected: INODE_CORE_BASE_SIZE, // 100
+			expected: INODEV1V2_SIZE, // 100
 		},
 		{
 			name:     "V1, forkoff=10",
 			version:  1,
 			forkoff:  10,
-			expected: 10*8 + INODE_CORE_BASE_SIZE, // 180
+			expected: 10*8 + INODEV1V2_SIZE, // 180
 		},
 	}
 
@@ -529,10 +529,10 @@ func TestParseBtreeBlock_V4Magic(t *testing.T) {
 	// Build a minimal V4 btree block header (24 bytes, big-endian).
 	var buf bytes.Buffer
 	binary.Write(&buf, binary.BigEndian, uint32(XFS_BMAP_MAGICa)) // Magic
-	binary.Write(&buf, binary.BigEndian, uint16(1))                // Level
-	binary.Write(&buf, binary.BigEndian, uint16(3))                // Numrecs
-	binary.Write(&buf, binary.BigEndian, int64(-1))                // BbLeftsib
-	binary.Write(&buf, binary.BigEndian, int64(-1))                // BbRightsib
+	binary.Write(&buf, binary.BigEndian, uint16(1))               // Level
+	binary.Write(&buf, binary.BigEndian, uint16(3))               // Numrecs
+	binary.Write(&buf, binary.BigEndian, int64(-1))               // BbLeftsib
+	binary.Write(&buf, binary.BigEndian, int64(-1))               // BbRightsib
 
 	xfs := &FileSystem{}
 	block, headerSize, err := xfs.parseBtreeBlock(&buf)
