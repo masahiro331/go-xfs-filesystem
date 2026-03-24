@@ -115,10 +115,11 @@ type BmbtKey uint64
 type BmbtPtr uint64
 
 // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/fs/xfs/libxfs/xfs_da_format.h#L203-L207
+// Parent inode is 4 bytes when i8count == 0, 8 bytes when i8count > 0.
 type Dir2SfHdr struct {
 	Count   uint8
 	I8Count uint8
-	Parent  uint32
+	Parent  uint64
 }
 
 type Dir2Block struct {
@@ -287,13 +288,24 @@ func (xfs *FileSystem) inodeFormatDevice(inode Inode) Inode {
 func (xfs *FileSystem) inodeFormatLocal(r io.Reader, inode Inode) (Inode, error) {
 	if inode.inodeCore.IsDir() {
 		inode.directoryLocal = &DirectoryLocal{}
-		if err := binary.Read(r, binary.BigEndian, &inode.directoryLocal.dir2SfHdr); err != nil {
-			return Inode{}, xerrors.Errorf("failed to read XFS_DINODE_FMT_LOCAL directory error: %w", err)
+		hdr := &inode.directoryLocal.dir2SfHdr
+		if err := binary.Read(r, binary.BigEndian, &hdr.Count); err != nil {
+			return Inode{}, xerrors.Errorf("failed to read dir2 sf hdr count: %w", err)
 		}
-
-		var isI8count bool
-		if inode.directoryLocal.dir2SfHdr.I8Count != 0 {
-			isI8count = true
+		if err := binary.Read(r, binary.BigEndian, &hdr.I8Count); err != nil {
+			return Inode{}, xerrors.Errorf("failed to read dir2 sf hdr i8count: %w", err)
+		}
+		isI8count := hdr.I8Count != 0
+		if isI8count {
+			if err := binary.Read(r, binary.BigEndian, &hdr.Parent); err != nil {
+				return Inode{}, xerrors.Errorf("failed to read dir2 sf hdr parent (8 bytes): %w", err)
+			}
+		} else {
+			var parent32 uint32
+			if err := binary.Read(r, binary.BigEndian, &parent32); err != nil {
+				return Inode{}, xerrors.Errorf("failed to read dir2 sf hdr parent (4 bytes): %w", err)
+			}
+			hdr.Parent = uint64(parent32)
 		}
 		hasFtype := xfs.PrimaryAG.SuperBlock.HasFtype()
 		for i := 0; i < int(inode.directoryLocal.dir2SfHdr.Count); i++ {
