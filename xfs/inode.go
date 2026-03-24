@@ -256,6 +256,9 @@ type InobtRec struct {
 	Free      uint64
 }
 
+// TODO: Use Holemask(), InoCount(), InoFreecount() together with HasSparseInodes()
+// to skip hole slots when walking the inode B+tree on sparse-inode filesystems.
+
 // Holemask returns the sparse inode holemask from ir_holemask (bits 31:16 of Freecount).
 // Freecount is read via binary.BigEndian, so host-order bit shifts match the on-disk layout.
 // Each bit represents 4 inodes; 1 = hole (no inode allocated).
