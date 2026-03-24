@@ -91,19 +91,22 @@ type BtreeBlockV4 struct {
 	BbRightsib int64
 }
 
-// BtreeBlock is the V5 (CRC) long format B+tree block header (72 bytes).
-// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1868
-type BtreeBlock struct {
-	BtreeBlockV4
-
-	// Long version header
-	// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1855
+// BtreeBlockV5Ext is the V5 (CRC) long format extension (48 bytes).
+// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1855
+type BtreeBlockV5Ext struct {
 	BbBlockNo uint64
 	BbLsn     uint64
 	UUID      [16]byte
 	BbOwner   uint64
 	CRC       uint32
 	Padding   int32
+}
+
+// BtreeBlock is the V5 (CRC) long format B+tree block header (72 bytes).
+// https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1868
+type BtreeBlock struct {
+	BtreeBlockV4
+	BtreeBlockV5Ext
 }
 
 // https://github.com/torvalds/linux/blob/d2b6f8a179194de0ffc4886ffc2c4358d86047b8/fs/xfs/libxfs/xfs_format.h#L1821
@@ -587,23 +590,9 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, int, error) {
 	switch v4.Magic {
 	case XFS_BMAP_CRC_MAGIC:
 		// V5: read the remaining 48 bytes (72 - 24) in one call.
-		var ext struct {
-			BbBlockNo uint64
-			BbLsn     uint64
-			UUID      [16]byte
-			BbOwner   uint64
-			CRC       uint32
-			Padding   int32
-		}
-		if err := binary.Read(r, binary.BigEndian, &ext); err != nil {
+		if err := binary.Read(r, binary.BigEndian, &btreeBlock.BtreeBlockV5Ext); err != nil {
 			return nil, 0, xerrors.Errorf("failed to read V5 b+tree block extension: %w", err)
 		}
-		btreeBlock.BbBlockNo = ext.BbBlockNo
-		btreeBlock.BbLsn = ext.BbLsn
-		btreeBlock.UUID = ext.UUID
-		btreeBlock.BbOwner = ext.BbOwner
-		btreeBlock.CRC = ext.CRC
-		btreeBlock.Padding = ext.Padding
 		return btreeBlock, binary.Size(BtreeBlock{}), nil
 	case XFS_BMAP_MAGICa:
 		// V4: header is complete (24 bytes).
