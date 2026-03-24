@@ -875,15 +875,12 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 
 func (xfs *FileSystem) nextBlockIsLeader(blockOffset uint64) bool {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset + 1)
-	if _, err := xfs.seekBlock(physicalBlockOffset); err != nil {
+	offset := physicalBlockOffset * int64(xfs.PrimaryAG.SuperBlock.BlockSize)
+	var buf [4]byte
+	if _, err := xfs.r.ReadAt(buf[:], offset); err != nil {
 		return false
 	}
-	blockData, err := xfs.readBlock(1)
-	if err != nil {
-		return false
-	}
-
-	magic := binary.BigEndian.Uint32(blockData[:4])
+	magic := binary.BigEndian.Uint32(buf[:])
 	return magic == XFS_DIR3_DATA_MAGIC || magic == XFS_DIR3_BLOCK_MAGIC ||
 		magic == XFS_DIR2_DATA_MAGIC || magic == XFS_DIR2_BLOCK_MAGIC
 }
