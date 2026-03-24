@@ -198,7 +198,8 @@ type SymlinkString struct {
 	Name string
 }
 
-// InodeCoreBase is the common 96-byte inode core header shared by V1, V2, and V3 inodes.
+// InodeCoreBase is the 100-byte on-disk inode header shared by V1, V2, and V3 inodes:
+// 96-byte di_core + 4-byte di_next_unlinked.
 type InodeCoreBase struct {
 	Magic        uint16
 	Mode         uint16
@@ -505,7 +506,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	}
 	r := bytes.NewReader(buf)
 
-	// Stage 1: Read the base 96-byte inode core (common to V1/V2/V3)
+	// Stage 1: Read the base 100-byte inode header (di_core + di_next_unlinked, common to V1/V2/V3)
 	if err := binary.Read(r, binary.BigEndian, &inode.inodeCore.InodeCoreBase); err != nil {
 		return nil, xerrors.Errorf("failed to read InodeCoreBase: %w", err)
 	}
