@@ -96,3 +96,21 @@ func (sb SuperBlock) BlockToAgBlockNumber(n uint64) uint64 {
 func (sb SuperBlock) BlockToPhysicalOffset(n uint64) int64 {
 	return int64(sb.BlockToAgNumber(n)*uint64(sb.Agblocks) + sb.BlockToAgBlockNumber(n))
 }
+
+// HasFtype returns true if directory entries contain a file type field.
+// V5 (CRC) filesystems use FeaturesIncompat, V4 uses Features2.
+func (sb SuperBlock) HasFtype() bool {
+	return sb.FeaturesIncompat&XFS_SB_FEAT_INCOMPAT_FTYPE != 0 ||
+		sb.Features2&XFS_SB_VERSION2_FTYPE != 0
+}
+
+// HasBigtime returns true if the filesystem has the bigtime feature enabled.
+// Bigtime extends the timestamp range from 1901-2038 to 1901-2486.
+func (sb SuperBlock) HasBigtime() bool {
+	return sb.FeaturesIncompat&XFS_SB_FEAT_INCOMPAT_BIGTIME != 0
+}
+
+// HasSparseInodes returns true if the filesystem has the sparse inode feature enabled.
+func (sb SuperBlock) HasSparseInodes() bool {
+	return sb.FeaturesIncompat&XFS_SB_FEAT_INCOMPAT_SPINODES != 0
+}

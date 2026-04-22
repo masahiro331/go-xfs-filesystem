@@ -86,6 +86,28 @@ func (xfs *FileSystem) Close() error {
 	return nil
 }
 
+// parseTimestamp converts an XFS on-disk timestamp to time.Time.
+// XFS has two timestamp formats:
+//   - Legacy: upper 32 bits = seconds (signed, since Unix epoch), lower 32 bits = nanoseconds
+//     (xfs_timestamp_t is {__be32 t_sec, __be32 t_nsec}, read as big-endian uint64)
+//   - Bigtime: 64-bit nanoseconds since Dec 13, 1901 20:45:52 UTC
+//
+// NOTE: This must be used for all inode timestamp fields (Atime, Mtime, Ctime, Crtime)
+// when they are exposed, not just Mtime.
+func parseTimestamp(ts uint64, bigtime bool) time.Time {
+	if bigtime {
+		// Bigtime format: 64-bit nanoseconds since bigtime epoch
+		sec := int64(ts/1_000_000_000) - XFS_BIGTIME_EPOCH_OFFSET
+		nsec := int64(ts % 1_000_000_000)
+		return time.Unix(sec, nsec)
+	}
+
+	// Legacy format: upper 32 bits = t_sec (signed), lower 32 bits = t_nsec
+	sec := int64(int32(ts >> 32))
+	nsec := int64(ts & 0xFFFFFFFF)
+	return time.Unix(sec, nsec)
+}
+
 func (xfs *FileSystem) Stat(name string) (fs.FileInfo, error) {
 	const op = "stat"
 
@@ -113,6 +135,11 @@ func (xfs *FileSystem) newFile(dirEntry dirEntry) (*File, error) {
 	dt := make(dataTable)
 	for _, rec := range recs {
 		p := rec.Unpack()
+		// Unwritten extents (State == 1) are preallocated but not yet written.
+		// They should be read as zero-filled data, so skip adding them to the table.
+		if p.State != 0 {
+			continue
+		}
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(p.StartBlock)
 		for i := int64(0); i < int64(p.BlockCount); i++ {
 			dt[int64(p.StartOff)+i] = physicalBlockOffset + i
@@ -146,8 +173,9 @@ func (xfs *FileSystem) ReadDirInfo(name string) (fs.FileInfo, error) {
 			return nil, xerrors.Errorf("failed to parse root inode: %w", err)
 		}
 		return FileInfo{
-			name:  "/",
-			inode: inode,
+			name:    "/",
+			inode:   inode,
+			bigtime: xfs.PrimaryAG.SuperBlock.HasBigtime(),
 		}, nil
 	}
 	name = strings.TrimRight(name, string(filepath.Separator))
@@ -210,7 +238,7 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	for _, entry := range dirEntries {
 		if !entry.IsDir() && entry.Name() == fileName {
 			if dir, ok := entry.(dirEntry); ok {
-				if dir.Type().Perm()&0xA000 != 0 {
+				if dir.Type()&fs.ModeSymlink != 0 {
 					return nil, ErrOpenSymlink
 				}
 
@@ -251,9 +279,10 @@ func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
 }
 
 func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
-	buf := make([]byte, 0, xfs.PrimaryAG.SuperBlock.BlockSize*count)
+	blockSize := int(xfs.PrimaryAG.SuperBlock.BlockSize)
+	buf := make([]byte, 0, blockSize*int(count))
 	for i := uint32(0); i < count; i++ {
-		b, err := utils.ReadBlock(xfs.r)
+		b, err := utils.ReadBlockN(xfs.r, blockSize)
 		if err != nil {
 			return nil, err
 		}
@@ -331,8 +360,9 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 		// TODO: mode use inode.InodeCore.Mode
 		fileInfos = append(fileInfos,
 			FileInfo{
-				name:  entry.Name(),
-				inode: inode,
+				name:    entry.Name(),
+				inode:   inode,
+				bigtime: xfs.PrimaryAG.SuperBlock.HasBigtime(),
 			},
 		)
 	}
@@ -395,8 +425,9 @@ func (xfs *FileSystem) listEntries(ino uint64) ([]Entry, error) {
 
 // FileInfo is implemented io/fs FileInfo interface
 type FileInfo struct {
-	name  string
-	inode *Inode
+	name    string
+	inode   *Inode
+	bigtime bool
 }
 
 func (i FileInfo) IsDir() bool {
@@ -404,7 +435,7 @@ func (i FileInfo) IsDir() bool {
 }
 
 func (i FileInfo) ModTime() time.Time {
-	return time.Unix(int64(i.inode.inodeCore.Mtime), 0)
+	return parseTimestamp(i.inode.inodeCore.Mtime, i.bigtime)
 }
 
 func (i FileInfo) Size() int64 {
@@ -429,10 +460,10 @@ func (i FileInfo) Mode() fs.FileMode {
 		translatedMode |= fs.ModeSticky
 	}
 	if m&0o2000 != 0 {
-		translatedMode |= fs.ModeSetuid
+		translatedMode |= fs.ModeSetgid
 	}
 	if m&0o4000 != 0 {
-		translatedMode |= fs.ModeSetgid
+		translatedMode |= fs.ModeSetuid
 	}
 
 	// bits 13-16 are file type bits, defined in stat.h
@@ -448,7 +479,7 @@ func (i FileInfo) Mode() fs.FileMode {
 	case 0x4000:
 		translatedMode |= fs.ModeDir
 	case 0x2000:
-		translatedMode |= fs.ModeCharDevice
+		translatedMode |= fs.ModeCharDevice | fs.ModeDevice
 	case 0x1000:
 		translatedMode |= fs.ModeNamedPipe
 	default:
@@ -506,8 +537,9 @@ func (f *File) Read(buf []byte) (int, error) {
 	if !ok {
 		if f.Size()-f.blockSize*f.currentBlock < f.blockSize {
 			f.buffer.Write(make([]byte, f.Size()-f.blockSize*f.currentBlock))
+		} else {
+			f.buffer.Write(make([]byte, f.blockSize))
 		}
-		f.buffer.Write(make([]byte, f.blockSize))
 	} else {
 		_, err := f.fs.seekBlock(offset)
 		if err != nil {

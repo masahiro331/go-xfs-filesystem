@@ -2,9 +2,14 @@ package xfs
 
 const (
 	BMBT_EXNTFLAG_BITLEN = 1
-	INODEV3_SIZE         = 176
-	INODE_SIZE           = 96
-	LEAF_ENTRY_SIZE      = 8
+	// INODEV1V2_SIZE is the on-disk size of a V1/V2 inode header:
+	// di_core (96 bytes) + di_next_unlinked (4 bytes) = 100 bytes.
+	// This is where the data fork starts for V1/V2 inodes (offset 0x64).
+	INODEV1V2_SIZE = 100
+	// INODEV3_SIZE is the on-disk size of a V3 inode header (176 bytes).
+	// This is where the data fork starts for V3 inodes (offset 0xb0).
+	INODEV3_SIZE    = 176
+	LEAF_ENTRY_SIZE = 8
 
 	XFS_DIR2_DATA_FD_COUNT  = 3
 	XFS_DIR2_DATA_FREE_TAG  = 0xffff
@@ -25,7 +30,7 @@ const (
 	XFS_IBT_CRC_MAGIC    = 0x49414233
 	XFS_FIBT_MAGIC       = 0x46494254
 	XFS_FIBT_CRC_MAGIC   = 0x46494233
-	XFS_BMAP_MAGICa      = 0x424d4150
+	XFS_BMAP_MAGICa      = 0x424d4150 // V4 B+tree block magic "BMAP" (non-CRC)
 	XFS_BMAP_CRC_MAGIC   = 0x424d4133
 	XFS_DA_NODE_MAGIC    = 0xfebe
 	XFS_DA3_NODE_MAGIC   = 0x3ebe
@@ -73,4 +78,20 @@ const (
 	XFS_DINODE_FMT_BTREE
 	XFS_DINODE_FMT_UUID
 	XFS_DINODE_FMT_RMAP
+)
+
+const (
+	// Superblock feature flags (FeaturesIncompat)
+	XFS_SB_FEAT_INCOMPAT_FTYPE       = 1 << 0
+	XFS_SB_FEAT_INCOMPAT_SPINODES    = 1 << 1
+	XFS_SB_FEAT_INCOMPAT_META_UUID   = 1 << 2
+	XFS_SB_FEAT_INCOMPAT_BIGTIME     = 1 << 3
+	XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR = 1 << 4
+)
+
+const (
+	// XFS_BIGTIME_EPOCH_OFFSET is the offset between the bigtime epoch (Dec 13, 1901)
+	// and the Unix epoch (Jan 1, 1970) in seconds.
+	// This equals 2^31 seconds.
+	XFS_BIGTIME_EPOCH_OFFSET = int64(1) << 31
 )
