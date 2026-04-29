@@ -87,6 +87,15 @@ const (
 	XFS_SB_FEAT_INCOMPAT_META_UUID   = 1 << 2
 	XFS_SB_FEAT_INCOMPAT_BIGTIME     = 1 << 3
 	XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR = 1 << 4
+	XFS_SB_FEAT_INCOMPAT_NREXT64     = 1 << 5
+)
+
+const (
+	// Per-inode di_flags2 bits.
+	// XFS_DIFLAG2_NREXT64 indicates that the on-disk layout uses 64-bit data fork
+	// extent counters (di_big_nextents at offset 24) instead of the legacy uint32
+	// di_nextents at offset 76.
+	XFS_DIFLAG2_NREXT64 = 1 << 4
 )
 
 const (
