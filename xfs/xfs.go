@@ -205,13 +205,11 @@ func (xfs *FileSystem) getRootInode() (*Inode, error) {
 // TODO: support ReadFile Interface
 func (xfs *FileSystem) ReadFile(name string) ([]byte, error) {
 	panic("implement me")
-	return []byte{}, nil
 }
 
 // TODO: support GlobFS Interface
 func (xfs *FileSystem) Glob(pattern string) ([]string, error) {
 	panic("implement me")
-	return []string{}, nil
 }
 
 func (xfs *FileSystem) wrapError(op, path string, err error) error {
