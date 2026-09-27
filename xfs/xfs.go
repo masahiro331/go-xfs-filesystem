@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"golang.org/x/xerrors"
-
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -33,7 +31,7 @@ var (
 
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {
-	r         *io.SectionReader
+	r         io.ReaderAt
 	PrimaryAG AG
 	AGs       []AG
 
@@ -245,43 +243,6 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 		}
 	}
 	return nil, fs.ErrNotExist
-}
-
-func (xfs *FileSystem) seekInode(n uint64) (int64, error) {
-	offset := int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n))
-	off, err := xfs.r.Seek(offset, io.SeekStart)
-	if err != nil {
-		return 0, err
-	}
-	if off != offset {
-		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
-	}
-	return off, nil
-}
-
-func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
-	offset := n * int64(xfs.PrimaryAG.SuperBlock.BlockSize)
-	off, err := xfs.r.Seek(offset, io.SeekStart)
-	if err != nil {
-		return 0, err
-	}
-	if off != offset {
-		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
-	}
-	return off, nil
-}
-
-func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
-	blockSize := int(xfs.PrimaryAG.SuperBlock.BlockSize)
-	buf := make([]byte, 0, blockSize*int(count))
-	for i := uint32(0); i < count; i++ {
-		b, err := utils.ReadBlockN(xfs.r, blockSize)
-		if err != nil {
-			return nil, err
-		}
-		buf = append(buf, b...)
-	}
-	return buf, nil
 }
 
 // readInode reads the on-disk inode n with a single ReadAt.
