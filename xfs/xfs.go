@@ -284,6 +284,41 @@ func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
 	return buf, nil
 }
 
+// readInode reads the on-disk inode n with a single ReadAt.
+func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
+	offset := int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n))
+	buf, err := xfs.readAt(offset, int(xfs.PrimaryAG.SuperBlock.Inodesize))
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read inode %d: %w", n, err)
+	}
+	return buf, nil
+}
+
+// readBlockAt reads the n-th filesystem block with a single ReadAt.
+func (xfs *FileSystem) readBlockAt(n int64) ([]byte, error) {
+	blockSize := int64(xfs.PrimaryAG.SuperBlock.BlockSize)
+	buf, err := xfs.readAt(n*blockSize, int(blockSize))
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read block %d: %w", n, err)
+	}
+	return buf, nil
+}
+
+// readAt reads exactly size bytes at offset without touching any shared
+// seek position, so it is safe for concurrent use.
+func (xfs *FileSystem) readAt(offset int64, size int) ([]byte, error) {
+	buf := make([]byte, size)
+	n, err := xfs.r.ReadAt(buf, offset)
+	if n != size {
+		if err == nil {
+			err = io.ErrUnexpectedEOF
+		}
+		return nil, xerrors.Errorf(ErrReadSizeFormat+": %w", n, size, err)
+	}
+	// io.ReaderAt may return io.EOF along with a full read at the end of input.
+	return buf, nil
+}
+
 func (xfs *FileSystem) readDirEntry(name string) ([]fs.DirEntry, error) {
 	inode, err := xfs.getRootInode()
 	if err != nil {
@@ -534,11 +569,7 @@ func (f *File) Read(buf []byte) (int, error) {
 			f.buffer.Write(make([]byte, f.blockSize))
 		}
 	} else {
-		_, err := f.fs.seekBlock(offset)
-		if err != nil {
-			return 0, xerrors.Errorf("failed to seek block: %w", err)
-		}
-		b, err := f.fs.readBlock(1)
+		b, err := f.fs.readBlockAt(offset)
 		if err != nil {
 			return 0, xerrors.Errorf("failed to read block: %w", err)
 		}
