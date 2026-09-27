@@ -10,7 +10,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -516,18 +515,9 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		}
 	}
 
-	_, err := xfs.seekInode(ino)
+	buf, err := xfs.readInode(ino)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to seek inode: %w", err)
-	}
-
-	sectorReader, err := utils.NewSectorReader(int(xfs.PrimaryAG.SuperBlock.Inodesize))
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create sector reader: %w", err)
-	}
-	buf, err := sectorReader.ReadSector(xfs.r)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to read sector: %w", err)
+		return nil, xerrors.Errorf("failed to read inode: %w", err)
 	}
 	r := bytes.NewReader(buf)
 
@@ -623,11 +613,7 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, int, error) {
 
 func (xfs *FileSystem) parseBtreeNode(blockNumber int64) ([]BmbtKey, []BmbtPtr, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-	b, err := xfs.readBlock(1)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, nil, xerrors.Errorf("failed to read block: %w", err)
 	}
@@ -649,11 +635,7 @@ func (xfs *FileSystem) parseBtreeNode(blockNumber int64) ([]BmbtKey, []BmbtPtr, 
 
 func (xfs *FileSystem) parseBtreeLeafNode(blockNumber int64) ([]BmbtRec, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-	b, err := xfs.readBlock(1)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block: %w", err)
 	}
@@ -854,11 +836,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 	var buf []byte
 	for blockOffset := bmbtIrec.StartBlock; blockOffset < bmbtIrec.StartBlock+bmbtIrec.BlockCount; blockOffset++ {
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset)
-		_, err := xfs.seekBlock(physicalBlockOffset)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek block: %w", err)
-		}
-		blockData, err := xfs.readBlock(1)
+		blockData, err := xfs.readBlockAt(physicalBlockOffset)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read block: %w", err)
 		}
