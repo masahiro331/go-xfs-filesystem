@@ -105,3 +105,14 @@ func TestReadInode(t *testing.T) {
 		})
 	}
 }
+
+func TestReadBlockAtInvalidBlockSize(t *testing.T) {
+	data := newReadTestData(4 * 4096)
+	for _, blockSize := range []uint32{0, 256, 1000} {
+		xfs := newReadTestFileSystem(bytes.NewReader(data))
+		xfs.PrimaryAG.SuperBlock.BlockSize = blockSize
+		if _, err := xfs.readBlockAt(1); err == nil {
+			t.Errorf("readBlockAt with BlockSize=%d: expected error", blockSize)
+		}
+	}
+}

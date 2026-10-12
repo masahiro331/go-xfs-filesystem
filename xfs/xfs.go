@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/xerrors"
+
+	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -258,6 +260,9 @@ func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
 // readBlockAt reads the n-th filesystem block with a single ReadAt.
 func (xfs *FileSystem) readBlockAt(n int64) ([]byte, error) {
 	blockSize := int64(xfs.PrimaryAG.SuperBlock.BlockSize)
+	if blockSize < utils.SectorSize || blockSize%utils.SectorSize != 0 {
+		return nil, xerrors.Errorf("invalid block size: %d, must be a multiple of %d", blockSize, utils.SectorSize)
+	}
 	buf, err := xfs.readAt(n*blockSize, int(blockSize))
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block %d: %w", n, err)
