@@ -10,11 +10,11 @@ import (
 	"github.com/masahiro331/go-xfs-filesystem/xfs"
 )
 
-// testdata/dirblk.xfs has 8 KiB directory blocks on 4 KiB filesystem blocks
+// testdata/dirblk8k.xfs has 8 KiB directory blocks on 4 KiB filesystem blocks
 // (Dirblklog=1), which the other test images do not, so each directory block
 // spans two filesystem blocks.
 func TestFileSystemMultiBlockDirectoryBlocks(t *testing.T) {
-	f, err := os.Open("testdata/dirblk.xfs")
+	f, err := os.Open("testdata/dirblk8k.xfs")
 	if err != nil {
 		t.Fatal(err)
 	}
