@@ -69,7 +69,8 @@ func TestFileSystemMultiBlockDirectoryBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const wantSum = "16ce766e5b11b54b7265405eff33677a873fb4919f9807e80d84389d33bb36c7"
+	// multi_block_file holds the output of `seq -w 1 4000`.
+	const wantSum = "75af5fcf1fdb4e79a5a0ec92c697ee90d1d3b87b6f2c50c1dbf668c089743894"
 	if got := fmt.Sprintf("%x", sha256.Sum256(b)); len(b) != 20000 || got != wantSum {
 		t.Errorf("multi_block_file: %d bytes, sha256 %s; want 20000 bytes, sha256 %s", len(b), got, wantSum)
 	}
