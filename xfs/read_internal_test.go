@@ -108,12 +108,19 @@ func TestReadInode(t *testing.T) {
 }
 
 func TestReadBlockAtInvalidBlockSize(t *testing.T) {
-	data := newReadTestData(4 * 4096)
-	for _, blockSize := range []uint32{0, 256, 1000} {
+	data := newReadTestData(65536)
+	for _, blockSize := range []uint32{0, 256, 1000, 1536, 131072, 0x7FFFFE00} {
 		xfs := newReadTestFileSystem(bytes.NewReader(data))
 		xfs.PrimaryAG.SuperBlock.BlockSize = blockSize
-		if _, err := xfs.readBlockAt(1); err == nil {
+		if _, err := xfs.readBlockAt(0); err == nil {
 			t.Errorf("readBlockAt with BlockSize=%d: expected error", blockSize)
+		}
+	}
+	for blockSize := uint32(512); blockSize <= 65536; blockSize *= 2 {
+		xfs := newReadTestFileSystem(bytes.NewReader(data))
+		xfs.PrimaryAG.SuperBlock.BlockSize = blockSize
+		if _, err := xfs.readBlockAt(0); err != nil {
+			t.Errorf("readBlockAt with BlockSize=%d: %v", blockSize, err)
 		}
 	}
 }
