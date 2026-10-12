@@ -82,12 +82,8 @@ func ReadBlock(r io.Reader) ([]byte, error) {
 
 func readSector(r io.Reader) ([]byte, error) {
 	buf := make([]byte, SectorSize)
-	i, err := r.Read(buf)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to read: %w", err)
-	}
-	if i != SectorSize {
-		return nil, xerrors.Errorf("read size error, expected(%d), actual(%d)", SectorSize, i)
+	if i, err := io.ReadFull(r, buf); err != nil {
+		return nil, xerrors.Errorf("read size error, expected(%d), actual(%d): %w", SectorSize, i, err)
 	}
 
 	return buf, nil
