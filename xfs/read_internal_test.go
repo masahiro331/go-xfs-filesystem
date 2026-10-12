@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 )
@@ -132,5 +133,28 @@ func TestReadInodeInvalidInodeSize(t *testing.T) {
 		if _, err := xfs.readInode(1); err != nil {
 			t.Errorf("readInode with Inodesize=%d: %v", inodeSize, err)
 		}
+	}
+}
+
+func TestReadAtShortReadIsUnexpectedEOF(t *testing.T) {
+	// The last block is only partially present.
+	data := newReadTestData(4*512 + 100)
+	readers := map[string]io.ReaderAt{
+		"bytes.Reader":  bytes.NewReader(data),
+		"SectionReader": io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))),
+	}
+	for name, r := range readers {
+		t.Run(name, func(t *testing.T) {
+			xfs := newReadTestFileSystem(r)
+			for _, n := range []int64{4, 5} { // partial block, block past the end
+				_, err := xfs.readBlockAt(n)
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Errorf("readBlockAt(%d): got %v, want io.ErrUnexpectedEOF", n, err)
+				}
+				if errors.Is(err, io.EOF) {
+					t.Errorf("readBlockAt(%d): error must not wrap io.EOF: %v", n, err)
+				}
+			}
+		})
 	}
 }

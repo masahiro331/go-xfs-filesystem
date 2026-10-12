@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/fs"
 	"path"
@@ -286,7 +287,10 @@ func (xfs *FileSystem) readAt(offset int64, size int) ([]byte, error) {
 	buf := make([]byte, size)
 	n, err := xfs.r.ReadAt(buf, offset)
 	if n != size {
-		if err == nil {
+		// A short read means the image is truncated. Report it as
+		// io.ErrUnexpectedEOF so that callers do not mistake it for a
+		// normal end of file.
+		if err == nil || errors.Is(err, io.EOF) {
 			err = io.ErrUnexpectedEOF
 		}
 		return nil, xerrors.Errorf(ErrReadSizeFormat+": %w", n, size, err)
