@@ -851,10 +851,8 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 		return nil, nil
 	}
 
-	// A directory block may span several filesystem blocks. Accumulate blocks
-	// until the next one starts with a directory block magic (a leader), then
-	// parse the accumulated buffer. The leader check uses the block that was
-	// just read, so every block is read exactly once.
+	// A directory block may span several filesystem blocks, and only its first
+	// block starts with a directory block magic, so split the buffer there.
 	var buf []byte
 	for blockOffset := bmbtIrec.StartBlock; blockOffset < bmbtIrec.StartBlock+bmbtIrec.BlockCount; blockOffset++ {
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset)

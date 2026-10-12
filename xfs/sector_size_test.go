@@ -11,10 +11,8 @@ import (
 	"github.com/masahiro331/go-xfs-filesystem/xfs"
 )
 
-// newLargeSectorImage rewrites the AG headers of testdata/image.xfs as if the
-// filesystem had been made with the given sector size: the superblock gets
-// the new Sectsize (and a block size at least as large) and a single AG, and
-// AGF, AGI and AGFL are moved to sectors 1, 2 and 3.
+// newLargeSectorImage lays out the AG headers of testdata/image.xfs as if it
+// had been made with sectSize, since no test image has sectors over 4 KiB.
 func newLargeSectorImage(t *testing.T, sectSize int) []byte {
 	t.Helper()
 	orig, err := os.ReadFile("testdata/image.xfs")
