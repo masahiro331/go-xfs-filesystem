@@ -127,12 +127,8 @@ func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	if sb.Sectsize != utils.SectorSize {
 		completeSector := int(sb.Sectsize - utils.SectorSize)
 		buf := make([]byte, completeSector)
-		i, err := r.Read(buf)
-		if err != nil {
-			return SuperBlock{}, xerrors.Errorf("failed to read: %w", err)
-		}
-		if i != completeSector {
-			return SuperBlock{}, xerrors.Errorf("sector size error, read %d byte", i)
+		if i, err := io.ReadFull(r, buf); err != nil {
+			return SuperBlock{}, xerrors.Errorf("sector size error, read %d of %d bytes: %w", i, completeSector, err)
 		}
 	}
 	return sb, nil
