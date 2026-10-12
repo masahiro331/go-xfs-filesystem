@@ -247,10 +247,20 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	return nil, fs.ErrNotExist
 }
 
+// Valid on-disk inode sizes (XFS_DINODE_MIN_SIZE and XFS_DINODE_MAX_SIZE).
+const (
+	minInodeSize = 256
+	maxInodeSize = 2048
+)
+
 // readInode reads the on-disk inode n with a single ReadAt.
 func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
+	inodeSize := int(xfs.PrimaryAG.SuperBlock.Inodesize)
+	if inodeSize < minInodeSize || inodeSize > maxInodeSize || inodeSize&(inodeSize-1) != 0 {
+		return nil, xerrors.Errorf("invalid inode size: %d, must be a power of 2 between %d and %d", inodeSize, minInodeSize, maxInodeSize)
+	}
 	offset := int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n))
-	buf, err := xfs.readAt(offset, int(xfs.PrimaryAG.SuperBlock.Inodesize))
+	buf, err := xfs.readAt(offset, inodeSize)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read inode %d: %w", n, err)
 	}

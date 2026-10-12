@@ -116,3 +116,21 @@ func TestReadBlockAtInvalidBlockSize(t *testing.T) {
 		}
 	}
 }
+
+func TestReadInodeInvalidInodeSize(t *testing.T) {
+	data := newReadTestData(8 * 4096)
+	for _, inodeSize := range []uint16{0, 100, 128, 384, 4096} {
+		xfs := newReadTestFileSystem(bytes.NewReader(data))
+		xfs.PrimaryAG.SuperBlock.Inodesize = inodeSize
+		if _, err := xfs.readInode(1); err == nil {
+			t.Errorf("readInode with Inodesize=%d: expected error", inodeSize)
+		}
+	}
+	for _, inodeSize := range []uint16{256, 512, 1024, 2048} {
+		xfs := newReadTestFileSystem(bytes.NewReader(data))
+		xfs.PrimaryAG.SuperBlock.Inodesize = inodeSize
+		if _, err := xfs.readInode(1); err != nil {
+			t.Errorf("readInode with Inodesize=%d: %v", inodeSize, err)
+		}
+	}
+}
