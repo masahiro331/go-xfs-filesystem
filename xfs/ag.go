@@ -183,13 +183,11 @@ func parseAGFL(sectorReader utils.SectorReader, r io.Reader) (AGFL, error) {
 	return agfl, nil
 }
 
-// agHeaderReadLimit bounds the AG header (SB, AGF, AGI, AGFL) region, which spans
-// 4 sectors. XFS sector size is at most 32 KiB, so 4 * 32 KiB covers every case.
+// agHeaderReadLimit allows 4 sectors (SB, AGF, AGI, AGFL) of the maximum XFS
+// sector size (32 KiB), since Sectsize is unknown until the superblock is read.
 const agHeaderReadLimit = 4 * 32 * 1024
 
-// ParseAG parses the allocation group headers located at offset.
-// It reads through reader.ReadAt and never moves a shared seek position,
-// so it is safe to call concurrently on the same reader.
+// ParseAG reads through ReadAt, so it is safe to call concurrently on a shared reader.
 func ParseAG(reader io.ReaderAt, offset int64) (*AG, error) {
 	var r io.Reader
 	var ag AG

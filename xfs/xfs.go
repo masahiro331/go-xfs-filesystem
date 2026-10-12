@@ -287,9 +287,7 @@ func (xfs *FileSystem) readAt(offset int64, size int) ([]byte, error) {
 	buf := make([]byte, size)
 	n, err := xfs.r.ReadAt(buf, offset)
 	if n != size {
-		// A short read means the image is truncated. Report it as
-		// io.ErrUnexpectedEOF so that callers do not mistake it for a
-		// normal end of file.
+		// A short read means a truncated image; it must not look like io.EOF.
 		if err == nil || errors.Is(err, io.EOF) {
 			err = io.ErrUnexpectedEOF
 		}
