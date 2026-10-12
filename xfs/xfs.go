@@ -297,7 +297,11 @@ func (xfs *FileSystem) readAt(offset int64, size int) ([]byte, error) {
 		}
 		return nil, xerrors.Errorf(ErrReadSizeFormat+": %w", n, size, err)
 	}
-	// io.ReaderAt may return io.EOF along with a full read at the end of input.
+	// io.ReaderAt may return io.EOF along with a full read at the end of input,
+	// but any other error means the data cannot be trusted.
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, xerrors.Errorf("failed to read at offset %d: %w", offset, err)
+	}
 	return buf, nil
 }
 

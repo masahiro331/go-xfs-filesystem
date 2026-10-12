@@ -165,3 +165,26 @@ func TestReadAtShortReadIsUnexpectedEOF(t *testing.T) {
 		})
 	}
 }
+
+// errOnFullReadReaderAt fills p completely but still reports err.
+type errOnFullReadReaderAt struct {
+	r   *bytes.Reader
+	err error
+}
+
+func (e errOnFullReadReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, _ := e.r.ReadAt(p, off)
+	return n, e.err
+}
+
+func TestReadAtFullReadWithError(t *testing.T) {
+	data := newReadTestData(4 * 512)
+	errDevice := errors.New("device error")
+	xfs := newReadTestFileSystem(errOnFullReadReaderAt{r: bytes.NewReader(data), err: errDevice})
+	if _, err := xfs.readBlockAt(1); !errors.Is(err, errDevice) {
+		t.Errorf("readBlockAt: got %v, want %v", err, errDevice)
+	}
+	if _, err := xfs.readInode(1); !errors.Is(err, errDevice) {
+		t.Errorf("readInode: got %v, want %v", err, errDevice)
+	}
+}
