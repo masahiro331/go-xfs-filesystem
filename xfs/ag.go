@@ -123,6 +123,9 @@ func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	if sb.Magicnum != XFS_SB_MAGIC {
 		return SuperBlock{}, xerrors.Errorf("failed to parse superblock magic byte error: %08x", sb.Magicnum)
 	}
+	if sb.Sectsize < utils.SectorSize || sb.Sectsize > maxSectorSize || sb.Sectsize&(sb.Sectsize-1) != 0 {
+		return SuperBlock{}, xerrors.Errorf("invalid sector size: %d, must be a power of 2 between %d and %d", sb.Sectsize, utils.SectorSize, maxSectorSize)
+	}
 
 	if sb.Sectsize != utils.SectorSize {
 		completeSector := int(sb.Sectsize - utils.SectorSize)

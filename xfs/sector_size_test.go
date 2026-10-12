@@ -66,3 +66,27 @@ func TestCheckLargeSectorSizeShortReads(t *testing.T) {
 		t.Fatal("Check failed on a reader that returns one byte per Read")
 	}
 }
+
+func TestCheckInvalidSectorSize(t *testing.T) {
+	orig, err := os.ReadFile("testdata/image.xfs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sectSize := range []uint16{0, 256, 1536, 65024} {
+		var sb xfs.SuperBlock
+		if err := binary.Read(bytes.NewReader(orig), binary.BigEndian, &sb); err != nil {
+			t.Fatal(err)
+		}
+		sb.Sectsize = sectSize
+		// Enough data that a read of the bogus remainder would succeed.
+		img := make([]byte, 128*1024)
+		var w bytes.Buffer
+		if err := binary.Write(&w, binary.BigEndian, &sb); err != nil {
+			t.Fatal(err)
+		}
+		copy(img, w.Bytes())
+		if xfs.Check(bytes.NewReader(img)) {
+			t.Errorf("Check accepted Sectsize=%d", sectSize)
+		}
+	}
+}
