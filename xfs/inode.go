@@ -5,12 +5,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"io"
+	"math"
 	"unsafe"
 
 	"golang.org/x/xerrors"
 
 	"github.com/masahiro331/go-xfs-filesystem/log"
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -516,18 +516,9 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		}
 	}
 
-	_, err := xfs.seekInode(ino)
+	buf, err := xfs.readInode(ino)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to seek inode: %w", err)
-	}
-
-	sectorReader, err := utils.NewSectorReader(int(xfs.PrimaryAG.SuperBlock.Inodesize))
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create sector reader: %w", err)
-	}
-	buf, err := sectorReader.ReadSector(xfs.r)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to read sector: %w", err)
+		return nil, xerrors.Errorf("failed to read inode: %w", err)
 	}
 	r := bytes.NewReader(buf)
 
@@ -548,6 +539,22 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		// Stage 2: Read V3 extension (76 bytes)
 		if err := binary.Read(r, binary.BigEndian, &inode.inodeCore.InodeCoreV3Ext); err != nil {
 			return nil, xerrors.Errorf("failed to read InodeCoreV3Ext: %w", err)
+		}
+
+		// XFS_DIFLAG2_NREXT64 relocates the data-fork extent counter to
+		// di_big_nextents (uint64 at offset 24); offset 76 then holds
+		// di_big_anextents. See xfs_dinode_has_large_extent_counts().
+		if inode.inodeCore.Flags2&XFS_DIFLAG2_NREXT64 != 0 {
+			bigNextents := binary.BigEndian.Uint64(buf[24:32])
+			if bigNextents > math.MaxUint32 {
+				return nil, xerrors.Errorf("data fork extent count %d exceeds uint32 (NREXT64)", bigNextents)
+			}
+			bigAnextents := inode.inodeCore.Nextents
+			if bigAnextents > math.MaxUint16 {
+				log.Logger.Warnf("attr fork extent count %d truncated to uint16 (NREXT64)", bigAnextents)
+			}
+			inode.inodeCore.Anextents = uint16(bigAnextents)
+			inode.inodeCore.Nextents = uint32(bigNextents)
 		}
 	} else {
 		// V1/V2: Promote OnLink to NLink, set Ino from argument
@@ -623,11 +630,7 @@ func (xfs *FileSystem) parseBtreeBlock(r io.Reader) (*BtreeBlock, int, error) {
 
 func (xfs *FileSystem) parseBtreeNode(blockNumber int64) ([]BmbtKey, []BmbtPtr, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-	b, err := xfs.readBlock(1)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, nil, xerrors.Errorf("failed to read block: %w", err)
 	}
@@ -649,11 +652,7 @@ func (xfs *FileSystem) parseBtreeNode(blockNumber int64) ([]BmbtKey, []BmbtPtr, 
 
 func (xfs *FileSystem) parseBtreeLeafNode(blockNumber int64) ([]BmbtRec, error) {
 	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(uint64(blockNumber))
-	_, err := xfs.seekBlock(physicalBlockOffset)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to seek block: %w", err)
-	}
-	b, err := xfs.readBlock(1)
+	b, err := xfs.readBlockAt(physicalBlockOffset)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to read block: %w", err)
 	}
@@ -856,11 +855,7 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 	var buf []byte
 	for blockOffset := bmbtIrec.StartBlock; blockOffset < bmbtIrec.StartBlock+bmbtIrec.BlockCount; blockOffset++ {
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset)
-		_, err := xfs.seekBlock(physicalBlockOffset)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek block: %w", err)
-		}
-		blockData, err := xfs.readBlock(1)
+		blockData, err := xfs.readBlockAt(physicalBlockOffset)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read block: %w", err)
 		}

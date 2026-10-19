@@ -6,6 +6,8 @@ var (
 	_ Cache[string, Inode] = &mockCache[string, Inode]{}
 )
 
+// Cache stores parsed inodes. A FileSystem may be used from multiple
+// goroutines, so implementations must be safe for concurrent use.
 type Cache[K comparable, V any] interface {
 	// Add cache data
 	Add(key K, value V) bool
