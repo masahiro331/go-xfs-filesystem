@@ -183,16 +183,22 @@ func parseAGFL(sectorReader utils.SectorReader, r io.Reader) (AGFL, error) {
 	return agfl, nil
 }
 
-func ParseAG(reader io.Reader) (*AG, error) {
+// agHeaderReadLimit allows 4 sectors (SB, AGF, AGI, AGFL) of the maximum XFS
+// sector size (32 KiB), since Sectsize is unknown until the superblock is read.
+const agHeaderReadLimit = 4 * 32 * 1024
+
+// ParseAG reads through ReadAt, so it is safe to call concurrently on a shared reader.
+func ParseAG(reader io.ReaderAt, offset int64) (*AG, error) {
 	var r io.Reader
 	var ag AG
 	var err error
+	sr := io.NewSectionReader(reader, offset, agHeaderReadLimit)
 	// Use the default block size as the upper bound for the superblock read,
 	// because the actual block size is unknown until the superblock is parsed.
 	// AG headers (SB, AGF, AGI, AGFL) are sector-aligned, and parseSuperBlock
 	// consumes exactly Sectsize bytes, so the reader position after this call
 	// is at offset Sectsize — which is exactly where AGF begins.
-	r = io.LimitReader(reader, int64(utils.BlockSize))
+	r = io.LimitReader(sr, int64(utils.BlockSize))
 	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse super block: %w", err)
@@ -205,19 +211,19 @@ func ParseAG(reader io.Reader) (*AG, error) {
 		return nil, xerrors.Errorf("failed to create chunk reader: %w", err)
 	}
 
-	r = io.LimitReader(reader, blockSize)
+	r = io.LimitReader(sr, blockSize)
 	ag.Agf, err = parseAGF(sectorReader, r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse agf block: %w", err)
 	}
 
-	r = io.LimitReader(reader, blockSize)
+	r = io.LimitReader(sr, blockSize)
 	ag.Agi, err = parseAGI(sectorReader, r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse agi block: %w", err)
 	}
 
-	r = io.LimitReader(reader, blockSize)
+	r = io.LimitReader(sr, blockSize)
 	ag.Agfl, err = parseAGFL(sectorReader, r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse agfl block: %w", err)

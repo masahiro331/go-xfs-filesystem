@@ -2,6 +2,7 @@ package xfs
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/fs"
 	"path"
@@ -10,8 +11,6 @@ import (
 	"time"
 
 	"golang.org/x/xerrors"
-
-	"github.com/masahiro331/go-xfs-filesystem/xfs/utils"
 )
 
 var (
@@ -33,7 +32,7 @@ var (
 
 // FileSystem is implemented io/fs FS interface
 type FileSystem struct {
-	r         *io.SectionReader
+	r         io.ReaderAt
 	PrimaryAG AG
 	AGs       []AG
 
@@ -49,7 +48,7 @@ func Check(r io.Reader) bool {
 }
 
 func NewFS(r io.SectionReader, cache Cache[string, any]) (*FileSystem, error) {
-	primaryAG, err := ParseAG(&r)
+	primaryAG, err := ParseAG(&r, 0)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse primary allocation group: %w", err)
 	}
@@ -66,14 +65,7 @@ func NewFS(r io.SectionReader, cache Cache[string, any]) (*FileSystem, error) {
 
 	AGSize := int64(primaryAG.SuperBlock.Agblocks) * int64(primaryAG.SuperBlock.BlockSize)
 	for i := int64(1); i < int64(primaryAG.SuperBlock.Agcount); i++ {
-		n, err := r.Seek(AGSize*i, 0)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to seek file: %w", err)
-		}
-		if n != AGSize*i {
-			return nil, xerrors.Errorf(ErrSeekOffsetFormat, n, AGSize*i)
-		}
-		ag, err := ParseAG(&r)
+		ag, err := ParseAG(&r, AGSize*i)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse allocation group %d: %w", i, err)
 		}
@@ -254,39 +246,61 @@ func (xfs *FileSystem) Open(name string) (fs.File, error) {
 	return nil, fs.ErrNotExist
 }
 
-func (xfs *FileSystem) seekInode(n uint64) (int64, error) {
+// Valid on-disk inode sizes (XFS_DINODE_MIN_SIZE and XFS_DINODE_MAX_SIZE).
+const (
+	minInodeSize = 256
+	maxInodeSize = 2048
+)
+
+// Valid filesystem block sizes (XFS_MIN_BLOCKSIZE and XFS_MAX_BLOCKSIZE).
+const (
+	minBlockSize = 512
+	maxBlockSize = 65536
+)
+
+// readInode reads the on-disk inode n with a single ReadAt.
+func (xfs *FileSystem) readInode(n uint64) ([]byte, error) {
+	inodeSize := int(xfs.PrimaryAG.SuperBlock.Inodesize)
+	if inodeSize < minInodeSize || inodeSize > maxInodeSize || inodeSize&(inodeSize-1) != 0 {
+		return nil, xerrors.Errorf("invalid inode size: %d, must be a power of 2 between %d and %d", inodeSize, minInodeSize, maxInodeSize)
+	}
 	offset := int64(xfs.PrimaryAG.SuperBlock.InodeAbsOffset(n))
-	off, err := xfs.r.Seek(offset, io.SeekStart)
+	buf, err := xfs.readAt(offset, inodeSize)
 	if err != nil {
-		return 0, err
+		return nil, xerrors.Errorf("failed to read inode %d: %w", n, err)
 	}
-	if off != offset {
-		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
-	}
-	return off, nil
+	return buf, nil
 }
 
-func (xfs *FileSystem) seekBlock(n int64) (int64, error) {
-	offset := n * int64(xfs.PrimaryAG.SuperBlock.BlockSize)
-	off, err := xfs.r.Seek(offset, io.SeekStart)
+// readBlockAt reads the n-th filesystem block with a single ReadAt.
+func (xfs *FileSystem) readBlockAt(n int64) ([]byte, error) {
+	blockSize := int64(xfs.PrimaryAG.SuperBlock.BlockSize)
+	if blockSize < minBlockSize || blockSize > maxBlockSize || blockSize&(blockSize-1) != 0 {
+		return nil, xerrors.Errorf("invalid block size: %d, must be a power of 2 between %d and %d", blockSize, minBlockSize, maxBlockSize)
+	}
+	buf, err := xfs.readAt(n*blockSize, int(blockSize))
 	if err != nil {
-		return 0, err
+		return nil, xerrors.Errorf("failed to read block %d: %w", n, err)
 	}
-	if off != offset {
-		return 0, xerrors.Errorf(ErrSeekOffsetFormat, off, offset)
-	}
-	return off, nil
+	return buf, nil
 }
 
-func (xfs *FileSystem) readBlock(count uint32) ([]byte, error) {
-	blockSize := int(xfs.PrimaryAG.SuperBlock.BlockSize)
-	buf := make([]byte, 0, blockSize*int(count))
-	for i := uint32(0); i < count; i++ {
-		b, err := utils.ReadBlockN(xfs.r, blockSize)
-		if err != nil {
-			return nil, err
+// readAt reads exactly size bytes at offset without touching any shared
+// seek position, so it is safe for concurrent use.
+func (xfs *FileSystem) readAt(offset int64, size int) ([]byte, error) {
+	buf := make([]byte, size)
+	n, err := xfs.r.ReadAt(buf, offset)
+	if n != size {
+		// A short read means a truncated image; it must not look like io.EOF.
+		if err == nil || errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
 		}
-		buf = append(buf, b...)
+		return nil, xerrors.Errorf(ErrReadSizeFormat+": %w", n, size, err)
+	}
+	// io.ReaderAt may return io.EOF along with a full read at the end of input,
+	// but any other error means the data cannot be trusted.
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, xerrors.Errorf("failed to read at offset %d: %w", offset, err)
 	}
 	return buf, nil
 }
@@ -541,11 +555,7 @@ func (f *File) Read(buf []byte) (int, error) {
 			f.buffer.Write(make([]byte, f.blockSize))
 		}
 	} else {
-		_, err := f.fs.seekBlock(offset)
-		if err != nil {
-			return 0, xerrors.Errorf("failed to seek block: %w", err)
-		}
-		b, err := f.fs.readBlock(1)
+		b, err := f.fs.readBlockAt(offset)
 		if err != nil {
 			return 0, xerrors.Errorf("failed to read block: %w", err)
 		}
