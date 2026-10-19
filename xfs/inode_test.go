@@ -282,6 +282,87 @@ func TestParseInodeV1OnLinkPromotion(t *testing.T) {
 	}
 }
 
+// TestParseInodeNrext64 verifies the NREXT64 (per-inode XFS_DIFLAG2_NREXT64)
+// layout where the data-fork extent counter is relocated from offset 76 (uint32)
+// to offset 24 (uint64). Without reinterpretation, Nextents reads 0 from the
+// wrong offset and inodeFormatExtents returns an empty bmbtRecs slice.
+func TestParseInodeNrext64(t *testing.T) {
+	buf := make([]byte, 512)
+	// Magic = "IN" (0x494e)
+	buf[0x00] = 0x49
+	buf[0x01] = 0x4e
+	// Mode = 0x416d (S_IFDIR | 0o555)
+	buf[0x02] = 0x41
+	buf[0x03] = 0x6d
+	// Version = 3
+	buf[0x04] = 3
+	// Format = XFS_DINODE_FMT_EXTENTS
+	buf[0x05] = XFS_DINODE_FMT_EXTENTS
+	// NLink = 5 (uint32 BE at offset 16)
+	binary.BigEndian.PutUint32(buf[0x10:0x14], 5)
+	// di_big_nextents = 1 (uint64 BE at offset 24, NREXT64 layout)
+	binary.BigEndian.PutUint64(buf[0x18:0x20], 1)
+	// Size = 4096 (uint64 BE at offset 56)
+	binary.BigEndian.PutUint64(buf[0x38:0x40], 4096)
+	// Nblocks = 1 (uint64 BE at offset 64)
+	binary.BigEndian.PutUint64(buf[0x40:0x48], 1)
+	// di_big_anextents = 0 (uint32 BE at offset 76 in NREXT64 layout)
+	// di_nrext64_pad = 0 (uint16 BE at offset 80 in NREXT64 layout)
+	// Forkoff = 24 (×8 = 192, attr fork starts at byte 192)
+	buf[0x52] = 24
+	// Aformat = 1 (FMT_LOCAL — typical for SELinux xattr)
+	buf[0x53] = 1
+	// di_flags2 = 0x18 (BIGTIME bit3 | NREXT64 bit4) — V3 ext at offset 100,
+	// Flags2 sits at offset 100 + 4 (CRC) + 8 (Changecount) + 8 (Lsn) = 120 (0x78)
+	binary.BigEndian.PutUint64(buf[0x78:0x80], 0x18)
+	// Ino = 131 (uint64 BE at offset 152 within V3 ext: 100 + 4 + 8 + 8 + 8 + 4 + 12 + 8 = 152)
+	binary.BigEndian.PutUint64(buf[0x98:0xa0], 131)
+	// Data fork starts at offset 176 — leave one zeroed bmbt record (16 bytes).
+
+	f := bytes.NewReader(buf)
+	sr := io.NewSectionReader(f, 0, int64(len(buf)))
+
+	xfs := &FileSystem{
+		r: sr,
+		PrimaryAG: AG{
+			SuperBlock: SuperBlock{
+				Inodesize: 512,
+				Inopblock: 8,
+				Inopblog:  3,
+				Agblklog:  19,
+				Agblocks:  524288,
+				BlockSize: 4096,
+			},
+		},
+		cache: &mockCache[string, any]{},
+	}
+
+	inode, err := xfs.ParseInode(0)
+	if err != nil {
+		t.Fatalf("ParseInode NREXT64 failed: %v", err)
+	}
+
+	if inode.inodeCore.Version != 3 {
+		t.Errorf("Version = %d, want 3", inode.inodeCore.Version)
+	}
+	if inode.inodeCore.Flags2&XFS_DIFLAG2_NREXT64 == 0 {
+		t.Errorf("Flags2 NREXT64 bit not set: 0x%x", inode.inodeCore.Flags2)
+	}
+	// Without NREXT64 reinterpretation Nextents would read 0 from offset 76.
+	if inode.inodeCore.Nextents != 1 {
+		t.Errorf("Nextents = %d, want 1 (NREXT64 reinterpretation)", inode.inodeCore.Nextents)
+	}
+	if !inode.inodeCore.IsDir() {
+		t.Error("expected directory")
+	}
+	if inode.directoryExtents == nil {
+		t.Fatal("directoryExtents is nil; inodeFormatExtents did not run")
+	}
+	if got := len(inode.directoryExtents.bmbtRecs); got != 1 {
+		t.Errorf("len(bmbtRecs) = %d, want 1", got)
+	}
+}
+
 func TestInobtRec_SparseFields(t *testing.T) {
 	tests := []struct {
 		name         string

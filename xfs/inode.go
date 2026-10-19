@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"io"
+	"math"
 	"unsafe"
 
 	"golang.org/x/xerrors"
@@ -548,6 +549,22 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		// Stage 2: Read V3 extension (76 bytes)
 		if err := binary.Read(r, binary.BigEndian, &inode.inodeCore.InodeCoreV3Ext); err != nil {
 			return nil, xerrors.Errorf("failed to read InodeCoreV3Ext: %w", err)
+		}
+
+		// XFS_DIFLAG2_NREXT64 relocates the data-fork extent counter to
+		// di_big_nextents (uint64 at offset 24); offset 76 then holds
+		// di_big_anextents. See xfs_dinode_has_large_extent_counts().
+		if inode.inodeCore.Flags2&XFS_DIFLAG2_NREXT64 != 0 {
+			bigNextents := binary.BigEndian.Uint64(buf[24:32])
+			if bigNextents > math.MaxUint32 {
+				return nil, xerrors.Errorf("data fork extent count %d exceeds uint32 (NREXT64)", bigNextents)
+			}
+			bigAnextents := inode.inodeCore.Nextents
+			if bigAnextents > math.MaxUint16 {
+				log.Logger.Warnf("attr fork extent count %d truncated to uint16 (NREXT64)", bigAnextents)
+			}
+			inode.inodeCore.Anextents = uint16(bigAnextents)
+			inode.inodeCore.Nextents = uint32(bigNextents)
 		}
 	} else {
 		// V1/V2: Promote OnLink to NLink, set Ino from argument
