@@ -850,6 +850,8 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 		return nil, nil
 	}
 
+	// A directory block may span several filesystem blocks, and only its first
+	// block starts with a directory block magic, so split the buffer there.
 	var buf []byte
 	for blockOffset := bmbtIrec.StartBlock; blockOffset < bmbtIrec.StartBlock+bmbtIrec.BlockCount; blockOffset++ {
 		physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset)
@@ -857,53 +859,62 @@ func (xfs *FileSystem) parseDir2Block(bmbtIrec BmbtIrec) ([]Dir2DataEntry, error
 		if err != nil {
 			return nil, xerrors.Errorf("failed to read block: %w", err)
 		}
+
+		if len(buf) > 0 && isDirBlockLeader(blockData) {
+			entries, err := xfs.parseDirBlockBuffer(buf)
+			if err != nil {
+				return nil, err
+			}
+			block.Entries = append(block.Entries, entries...)
+			buf = nil
+		}
 		buf = append(buf, blockData...)
+	}
 
-		// if the next block is not a leader, it is a continuation of the previous block
-		if blockOffset != bmbtIrec.StartBlock+bmbtIrec.BlockCount-1 && // not last block
-			!xfs.nextBlockIsLeader(blockOffset) { // not leader
-			continue
+	if len(buf) > 0 {
+		entries, err := xfs.parseDirBlockBuffer(buf)
+		if err != nil {
+			return nil, err
 		}
-
-		// if the next block is a leader, it is the last block of the directory
-		magicBytes := binary.BigEndian.Uint32(buf[:4])
-		reader := bytes.NewReader(buf)
-		if err := xfs.skipDirBlockHeader(reader, magicBytes); err != nil {
-			return nil, xerrors.Errorf("failed to skip dir block header: %w", err)
-		}
-		hasFtype := xfs.PrimaryAG.SuperBlock.HasFtype()
-		switch magicBytes {
-		case XFS_DIR3_DATA_MAGIC, XFS_DIR2_DATA_MAGIC:
-			entries, err := xfs.parseXDD3Block(reader, hasFtype)
-			if err != nil {
-				return nil, xerrors.Errorf("failed to parse dir data block: %w", err)
-			}
-			block.Entries = append(block.Entries, entries...)
-		case XFS_DIR3_BLOCK_MAGIC, XFS_DIR2_BLOCK_MAGIC:
-			entries, err := xfs.parseXDB3Block(reader, hasFtype)
-			if err != nil {
-				return nil, xerrors.Errorf("failed to parse dir block: %w", err)
-			}
-			block.Entries = append(block.Entries, entries...)
-		default:
-			return nil, xerrors.Errorf("unknown magic bytes: %x", magicBytes)
-		}
-
-		// reset buf
-		buf = []byte{}
+		block.Entries = append(block.Entries, entries...)
 	}
 
 	return block.Entries, nil
 }
 
-func (xfs *FileSystem) nextBlockIsLeader(blockOffset uint64) bool {
-	physicalBlockOffset := xfs.PrimaryAG.SuperBlock.BlockToPhysicalOffset(blockOffset + 1)
-	offset := physicalBlockOffset * int64(xfs.PrimaryAG.SuperBlock.BlockSize)
-	var buf [4]byte
-	if _, err := xfs.r.ReadAt(buf[:], offset); err != nil {
+// parseDirBlockBuffer parses one complete directory block, which may span
+// several filesystem blocks.
+func (xfs *FileSystem) parseDirBlockBuffer(buf []byte) ([]Dir2DataEntry, error) {
+	magicBytes := binary.BigEndian.Uint32(buf[:4])
+	reader := bytes.NewReader(buf)
+	if err := xfs.skipDirBlockHeader(reader, magicBytes); err != nil {
+		return nil, xerrors.Errorf("failed to skip dir block header: %w", err)
+	}
+	hasFtype := xfs.PrimaryAG.SuperBlock.HasFtype()
+	switch magicBytes {
+	case XFS_DIR3_DATA_MAGIC, XFS_DIR2_DATA_MAGIC:
+		entries, err := xfs.parseXDD3Block(reader, hasFtype)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse dir data block: %w", err)
+		}
+		return entries, nil
+	case XFS_DIR3_BLOCK_MAGIC, XFS_DIR2_BLOCK_MAGIC:
+		entries, err := xfs.parseXDB3Block(reader, hasFtype)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse dir block: %w", err)
+		}
+		return entries, nil
+	default:
+		return nil, xerrors.Errorf("unknown magic bytes: %x", magicBytes)
+	}
+}
+
+// isDirBlockLeader reports whether b starts with a directory block magic.
+func isDirBlockLeader(b []byte) bool {
+	if len(b) < 4 {
 		return false
 	}
-	magic := binary.BigEndian.Uint32(buf[:])
+	magic := binary.BigEndian.Uint32(b[:4])
 	return magic == XFS_DIR3_DATA_MAGIC || magic == XFS_DIR3_BLOCK_MAGIC ||
 		magic == XFS_DIR2_DATA_MAGIC || magic == XFS_DIR2_BLOCK_MAGIC
 }

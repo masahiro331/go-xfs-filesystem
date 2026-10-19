@@ -123,16 +123,15 @@ func parseSuperBlock(r io.Reader) (SuperBlock, error) {
 	if sb.Magicnum != XFS_SB_MAGIC {
 		return SuperBlock{}, xerrors.Errorf("failed to parse superblock magic byte error: %08x", sb.Magicnum)
 	}
+	if sb.Sectsize < utils.SectorSize || sb.Sectsize > maxSectorSize || sb.Sectsize&(sb.Sectsize-1) != 0 {
+		return SuperBlock{}, xerrors.Errorf("invalid sector size: %d, must be a power of 2 between %d and %d", sb.Sectsize, utils.SectorSize, maxSectorSize)
+	}
 
 	if sb.Sectsize != utils.SectorSize {
 		completeSector := int(sb.Sectsize - utils.SectorSize)
 		buf := make([]byte, completeSector)
-		i, err := r.Read(buf)
-		if err != nil {
-			return SuperBlock{}, xerrors.Errorf("failed to read: %w", err)
-		}
-		if i != completeSector {
-			return SuperBlock{}, xerrors.Errorf("sector size error, read %d byte", i)
+		if i, err := io.ReadFull(r, buf); err != nil {
+			return SuperBlock{}, xerrors.Errorf("sector size error, read %d of %d bytes: %w", i, completeSector, err)
 		}
 	}
 	return sb, nil
@@ -183,9 +182,12 @@ func parseAGFL(sectorReader utils.SectorReader, r io.Reader) (AGFL, error) {
 	return agfl, nil
 }
 
+// maxSectorSize is the largest sector size XFS supports (XFS_MAX_SECTORSIZE).
+const maxSectorSize = 32 * 1024
+
 // agHeaderReadLimit allows 4 sectors (SB, AGF, AGI, AGFL) of the maximum XFS
-// sector size (32 KiB), since Sectsize is unknown until the superblock is read.
-const agHeaderReadLimit = 4 * 32 * 1024
+// sector size, since Sectsize is unknown until the superblock is read.
+const agHeaderReadLimit = 4 * maxSectorSize
 
 // ParseAG reads through ReadAt, so it is safe to call concurrently on a shared reader.
 func ParseAG(reader io.ReaderAt, offset int64) (*AG, error) {
@@ -193,12 +195,12 @@ func ParseAG(reader io.ReaderAt, offset int64) (*AG, error) {
 	var ag AG
 	var err error
 	sr := io.NewSectionReader(reader, offset, agHeaderReadLimit)
-	// Use the default block size as the upper bound for the superblock read,
-	// because the actual block size is unknown until the superblock is parsed.
+	// Use the maximum sector size as the upper bound for the superblock read,
+	// because the actual sector size is unknown until the superblock is parsed.
 	// AG headers (SB, AGF, AGI, AGFL) are sector-aligned, and parseSuperBlock
 	// consumes exactly Sectsize bytes, so the reader position after this call
 	// is at offset Sectsize — which is exactly where AGF begins.
-	r = io.LimitReader(sr, int64(utils.BlockSize))
+	r = io.LimitReader(sr, maxSectorSize)
 	ag.SuperBlock, err = parseSuperBlock(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse super block: %w", err)
