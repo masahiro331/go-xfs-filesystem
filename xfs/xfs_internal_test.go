@@ -2,8 +2,11 @@ package xfs
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
+	"io/fs"
+	"os"
 	"testing"
 )
 
@@ -186,5 +189,65 @@ func TestReadAtFullReadWithError(t *testing.T) {
 	}
 	if _, err := xfs.readInode(1); !errors.Is(err, errDevice) {
 		t.Errorf("readInode: got %v, want %v", err, errDevice)
+	}
+}
+
+// A snapshot of a mounted filesystem can have a directory entry whose inode
+// was freed by a change that is only in the log. Such an entry must not show
+// up as a file.
+func TestDirectoryEntryToFreeInode(t *testing.T) {
+	const name = "fmt_extents_file_1024"
+
+	data, err := os.ReadFile("testdata/image.xfs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig, err := NewFS(*io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileInfos, err := orig.listFileInfo(orig.PrimaryAG.SuperBlock.Rootino)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ino uint64
+	for _, fi := range fileInfos {
+		if fi.Name() == name {
+			ino = fi.inode.inodeCore.Ino
+		}
+	}
+	if ino == 0 {
+		t.Fatalf("%s not found in the root directory", name)
+	}
+	entries, err := orig.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// di_mode is at byte 2 of the inode; xfs_ifree sets it to 0.
+	off := orig.PrimaryAG.SuperBlock.InodeAbsOffset(ino)
+	binary.BigEndian.PutUint16(data[off+2:], 0)
+	fileSystem, err := NewFS(*io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := fileSystem.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(entries)-1 {
+		t.Errorf("ReadDir returned %d entries, want %d", len(got), len(entries)-1)
+	}
+	for _, e := range got {
+		if e.Name() == name {
+			t.Errorf("ReadDir returned %s, whose inode is free", name)
+		}
+	}
+	if _, err := fileSystem.Open(name); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Open(%s) error = %v, want fs.ErrNotExist", name, err)
+	}
+	if _, err := fileSystem.Stat(name); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Stat(%s) error = %v, want fs.ErrNotExist", name, err)
 	}
 }
