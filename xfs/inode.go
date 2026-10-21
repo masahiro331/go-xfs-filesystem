@@ -568,7 +568,7 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 	// inode when a cache is in use, although directories are listed again on
 	// every path lookup.
 	if inode.inodeCore.isFree() {
-		log.Logger.Debugf("inode %d is free; directory entries pointing to it are skipped", ino)
+		log.Logger.Debugf("inode %d is free; its data fork is not parsed", ino)
 		xfs.cache.Add(inodeCacheKey(ino), inode)
 		return &inode, nil
 	}
