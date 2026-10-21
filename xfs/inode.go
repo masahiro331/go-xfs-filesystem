@@ -327,7 +327,7 @@ func (xfs *FileSystem) inodeFormatLocal(r io.Reader, inode Inode) (Inode, error)
 		}
 		inode.symlinkString.Name = string(buf)
 	} else {
-		log.Logger.Warn("not support XFS_DINODE_FMT_LOCAL")
+		log.Logger.Warnf("unexpected file type %#o for local format inode %d", inode.inodeCore.Mode&0xF000, inode.inodeCore.Ino)
 	}
 	return inode, nil
 }
@@ -361,8 +361,7 @@ func (xfs *FileSystem) inodeFormatExtents(r io.Reader, inode Inode) (Inode, erro
 	} else if inode.inodeCore.IsSymlink() {
 		log.Logger.Warn("not support XFS_DINODE_FMT_EXTENTS isSymlink")
 	} else {
-		log.Logger.Debugf("%+v\n", inode)
-		log.Logger.Debug("not support XFS_DINODE_FMT_EXTENTS")
+		log.Logger.Debugf("unexpected file type %#o for extents format inode %d", inode.inodeCore.Mode&0xF000, inode.inodeCore.Ino)
 	}
 
 	return inode, nil
