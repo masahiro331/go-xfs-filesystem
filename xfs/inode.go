@@ -564,6 +564,16 @@ func (xfs *FileSystem) ParseInode(ino uint64) (*Inode, error) {
 		inode.inodeCore.Ino = ino
 	}
 
+	// A free inode keeps a stale data fork, which says nothing about any file.
+	// Logging here, before the inode is cached, keeps the message to once per
+	// inode when a cache is in use, although directories are listed again on
+	// every path lookup.
+	if inode.inodeCore.isFree() {
+		log.Logger.Debugf("inode %d is free; directory entries pointing to it are skipped", ino)
+		xfs.cache.Add(inodeCacheKey(ino), inode)
+		return &inode, nil
+	}
+
 	switch inode.inodeCore.Format {
 	case XFS_DINODE_FMT_DEV:
 		inode = xfs.inodeFormatDevice(inode)
@@ -971,6 +981,12 @@ func (ic InodeCore) IsSocket() bool {
 
 func (ic InodeCore) IsSymlink() bool {
 	return ic.Mode&0xF000 == 0xA000
+}
+
+// isFree reports whether the inode is unallocated. XFS clears the whole mode
+// when it frees an inode, as the kernel's xfs_ifree does.
+func (ic InodeCore) isFree() bool {
+	return ic.Mode == 0
 }
 
 func (ic InodeCore) isSupported() bool {
