@@ -369,6 +369,11 @@ func (xfs *FileSystem) listFileInfo(ino uint64) ([]FileInfo, error) {
 		if err != nil {
 			return nil, xerrors.Errorf("failed to parse inode %d: %w", entry.InodeNumber(), err)
 		}
+		// The entry may outlive its inode when the image has directory changes
+		// that only the log holds, such as a snapshot of a mounted filesystem.
+		if inode.inodeCore.isFree() {
+			continue
+		}
 		// TODO: mode use inode.InodeCore.Mode
 		fileInfos = append(fileInfos,
 			FileInfo{
